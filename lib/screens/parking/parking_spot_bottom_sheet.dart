@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:smart_parking_app/config/app_config.dart';
-import 'package:smart_parking_app/models/parking_spot.dart';
+import 'package:smart_parking_app/models/parking_spot.dart' hide TimeOfDay;
 import 'package:smart_parking_app/providers/parking_provider.dart';
 import 'package:smart_parking_app/screens/parking/booking_confirmation_screen.dart';
 import 'package:smart_parking_app/widgets/common/loading_indicator.dart';
@@ -148,19 +148,19 @@ class _ParkingSpotBottomSheetState extends State<ParkingSpotBottomSheet> {
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: spot.isUserCreated == true 
-                      ? Colors.purple.shade100 
-                      : Colors.blue.shade100,
+                  color: !spot.isVerified 
+                      ? Colors.orange.shade100 
+                      : Colors.green.shade100,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  spot.isUserCreated == true ? 'USER CREATED' : 'VERIFIED',
+                  !spot.isVerified ? 'UNVERIFIED' : 'VERIFIED',
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.bold,
-                    color: spot.isUserCreated == true 
-                        ? Colors.purple.shade800 
-                        : Colors.blue.shade800,
+                    color: !spot.isVerified 
+                        ? Colors.orange.shade800 
+                        : Colors.green.shade800,
                   ),
                 ),
               ),
@@ -207,9 +207,9 @@ class _ParkingSpotBottomSheetState extends State<ParkingSpotBottomSheet> {
                 '${AppConfig.currencySymbol}${spot.pricePerHour.toStringAsFixed(2)}/hr',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              if (spot.features.isNotEmpty) ...[
+              if (spot.amenities.isNotEmpty) ...[
                 SizedBox(width: 16),
-                ...spot.features.take(2).map((feature) => 
+                ...spot.amenities.take(2).map((amenity) => 
                   Container(
                     margin: EdgeInsets.only(right: 8),
                     padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -218,13 +218,13 @@ class _ParkingSpotBottomSheetState extends State<ParkingSpotBottomSheet> {
                       borderRadius: BorderRadius.circular(4),
                     ),
                     child: Text(
-                      feature,
+                      amenity,
                       style: TextStyle(fontSize: 12),
                     ),
                   ),
                 ),
-                if (spot.features.length > 2) 
-                  Text('+${spot.features.length - 2} more'),
+                if (spot.amenities.length > 2) 
+                  Text('+${spot.amenities.length - 2} more'),
               ],
             ],
           ),

@@ -13,8 +13,8 @@ class LocationProvider with ChangeNotifier {
   Position? get currentPosition => _currentPosition;
   // Adding currentLocation getter to match usage in other files
   Position? get currentLocation => _currentPosition;
-  double get latitude => _currentPosition?.latitude ?? AppConstants.defaultLat;
-  double get longitude => _currentPosition?.longitude ?? AppConstants.defaultLng;
+  double get latitude => _currentPosition?.latitude ?? 37.7749;
+  double get longitude => _currentPosition?.longitude ?? -122.4194;
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasLocation => _currentPosition != null;

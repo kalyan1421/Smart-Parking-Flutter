@@ -62,7 +62,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       
       // Load active bookings for user
       if (authProvider.currentUser != null) {
-        await bookingProvider.loadActiveBookings(authProvider.currentUser!.id.toHexString());
+        await bookingProvider.loadActiveBookings(authProvider.currentUser!.id);
       }
       
       // Load nearby parking spots
@@ -233,7 +233,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final nearbySpots = parkingProvider.nearbyParkingSpots.take(5).toList();
     for (final spot in nearbySpots) {
       // Skip if this spot is already booked by the user
-      if (bookingProvider.activeBookings.any((b) => b.parkingSpotId == spot.id.toHexString())) {
+      if (bookingProvider.activeBookings.any((b) => b.parkingSpotId == spot.id)) {
         continue;
       }
       
@@ -269,15 +269,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
     
     // Create parking spot object for directions
     final parkingSpot = ParkingSpot(
-      id: ObjectIdLike(booking.parkingSpotId),
+      id: booking.parkingSpotId,
       name: booking.parkingSpotName,
-      description: '',
+      description: 'Booked parking spot',
+      address: '', // Not available from booking
       latitude: booking.latitude,
       longitude: booking.longitude,
       totalSpots: 0,
       availableSpots: 0,
-      pricePerHour: booking.totalPrice / (booking.endTime.difference(booking.startTime).inHours),
-      features: [],
+      pricePerHour: booking.totalPrice / (booking.endTime.difference(booking.startTime).inHours == 0 ? 1 : booking.endTime.difference(booking.startTime).inHours),
+      amenities: [],
+      operatingHours: {},
+      vehicleTypes: ['car'],
+      ownerId: '',
+      geoPoint: null,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      isVerified: true,
     );
     
     return Card(
@@ -535,7 +543,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'Welcome, ${authProvider.currentUser?.name ?? 'User'}!',
+                                    'Welcome, ${authProvider.currentUser?.displayName ?? 'User'}!',
                                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -552,8 +560,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               radius: 30,
                               backgroundColor: Theme.of(context).primaryColor,
                               child: Text(
-                                authProvider.currentUser?.name.isNotEmpty == true
-                                    ? authProvider.currentUser!.name[0].toUpperCase()
+                                authProvider.currentUser?.displayName.isNotEmpty == true
+                                    ? authProvider.currentUser!.displayName[0].toUpperCase()
                                     : 'U',
                                 style: TextStyle(
                                   fontSize: 24,
@@ -814,6 +822,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ),
                         _buildQuickActionCard(
                           context,
+                          Icons.list,
+                          'All Parking',
+                          () {
+                            Navigator.pushNamed(context, AppRoutes.parkingList);
+                          },
+                        ),
+                        _buildQuickActionCard(
+                          context,
                           Icons.history,
                           'Bookings',
                           () {
@@ -821,14 +837,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           },
                           badge: bookingProvider.activeBookings.length > 0 ? 
                             bookingProvider.activeBookings.length.toString() : null,
-                        ),
-                        _buildQuickActionCard(
-                          context,
-                          Icons.add_location,
-                          'Add Spot',
-                          () {
-                            Navigator.pushNamed(context, AppRoutes.parkingmap);
-                          },
                         ),
                       ],
                     ),

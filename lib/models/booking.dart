@@ -1,142 +1,222 @@
 // lib/models/booking.dart
-import 'package:mongo_dart/mongo_dart.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+enum BookingStatus { pending, confirmed, active, completed, cancelled, expired }
 
 class Booking {
-  final dynamic id; // Can be ObjectId or String
+  final String id;
   final String userId;
   final String parkingSpotId;
   final String parkingSpotName;
+  final String vehicleId;
   final double latitude;
   final double longitude;
   final DateTime startTime;
   final DateTime endTime;
+  final double pricePerHour;
   final double totalPrice;
-  final String status; // active, completed, cancelled
+  final double? cancellationFee;
+  final BookingStatus status;
   final DateTime createdAt;
-  final DateTime? updatedAt;
+  final DateTime updatedAt;
+  final String? qrCode; // QR code for entry/exit
+  final Map<String, dynamic> paymentInfo;
+  final String? notes;
+  final List<String> notifications; // Notification IDs sent for this booking
+  final DateTime? checkedInAt;
+  final DateTime? checkedOutAt;
+  final Map<String, dynamic>? feedback; // User rating and review
 
   Booking({
     required this.id,
     required this.userId,
     required this.parkingSpotId,
     required this.parkingSpotName,
+    required this.vehicleId,
     required this.latitude,
     required this.longitude,
     required this.startTime,
     required this.endTime,
+    required this.pricePerHour,
     required this.totalPrice,
-    required this.status,
+    this.cancellationFee,
+    this.status = BookingStatus.pending,
     required this.createdAt,
-    this.updatedAt,
+    required this.updatedAt,
+    this.qrCode,
+    this.paymentInfo = const {},
+    this.notes,
+    this.notifications = const [],
+    this.checkedInAt,
+    this.checkedOutAt,
+    this.feedback,
   });
 
-  // Create a copy with updated values
-  Booking copyWith({
-    dynamic id,
-    String? userId,
-    String? parkingSpotId,
-    String? parkingSpotName,
-    double? latitude,
-    double? longitude,
-    DateTime? startTime,
-    DateTime? endTime,
-    double? totalPrice,
-    String? status,
-    DateTime? createdAt,
-    DateTime? updatedAt,
-  }) {
-    return Booking(
-      id: id ?? this.id,
-      userId: userId ?? this.userId,
-      parkingSpotId: parkingSpotId ?? this.parkingSpotId,
-      parkingSpotName: parkingSpotName ?? this.parkingSpotName,
-      latitude: latitude ?? this.latitude,
-      longitude: longitude ?? this.longitude,
-      startTime: startTime ?? this.startTime,
-      endTime: endTime ?? this.endTime,
-      totalPrice: totalPrice ?? this.totalPrice,
-      status: status ?? this.status,
-      createdAt: createdAt ?? this.createdAt,
-      updatedAt: updatedAt ?? this.updatedAt,
-    );
-  }
-
-  // Convert from JSON
-  factory Booking.fromJson(Map<String, dynamic> json) {
-    // Extract coordinates from location object
-    double latitude = 0.0;
-    double longitude = 0.0;
+  // Factory constructor from Firestore document
+  factory Booking.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
     
-    if (json.containsKey('location') && json['location'] is Map) {
-      final location = json['location'] as Map;
-      if (location.containsKey('coordinates') && location['coordinates'] is List) {
-        final coordinates = location['coordinates'] as List;
-        if (coordinates.length >= 2) {
-          longitude = (coordinates[0] as num).toDouble();
-          latitude = (coordinates[1] as num).toDouble();
-        }
-      }
-    }
-
-    // Process userId - leave as it is, don't try to convert
-    String userIdStr = '';
-    if (json['userId'] is ObjectId) {
-      userIdStr = json['userId'].toHexString();
-    } else if (json['userId'] is String) {
-      userIdStr = json['userId'];
-    } else {
-      userIdStr = json['userId'].toString();
-    }
-
     return Booking(
-      id: json['_id'], // Keep as is (ObjectId or String)
-      userId: userIdStr,
-      parkingSpotId: json['parkingSpotId'],
-      parkingSpotName: json['parkingSpotName'],
-      latitude: latitude,
-      longitude: longitude,
-      startTime: DateTime.parse(json['startTime']),
-      endTime: DateTime.parse(json['endTime']),
-      totalPrice: (json['totalPrice'] as num).toDouble(),
-      status: json['status'],
-      createdAt: DateTime.parse(json['createdAt']),
-      updatedAt: json.containsKey('updatedAt') && json['updatedAt'] != null
-          ? DateTime.parse(json['updatedAt'])
+      id: doc.id,
+      userId: data['userId'] ?? '',
+      parkingSpotId: data['parkingSpotId'] ?? '',
+      parkingSpotName: data['parkingSpotName'] ?? '',
+      vehicleId: data['vehicleId'] ?? '',
+      latitude: data['latitude']?.toDouble() ?? 0.0,
+      longitude: data['longitude']?.toDouble() ?? 0.0,
+      startTime: (data['startTime'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      endTime: (data['endTime'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      pricePerHour: data['pricePerHour']?.toDouble() ?? 0.0,
+      totalPrice: data['totalPrice']?.toDouble() ?? 0.0,
+      cancellationFee: data['cancellationFee']?.toDouble(),
+      status: _parseStatus(data['status']),
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      qrCode: data['qrCode'],
+      paymentInfo: Map<String, dynamic>.from(data['paymentInfo'] ?? {}),
+      notes: data['notes'],
+      notifications: _parseStringList(data['notifications']),
+      checkedInAt: (data['checkedInAt'] as Timestamp?)?.toDate(),
+      checkedOutAt: (data['checkedOutAt'] as Timestamp?)?.toDate(),
+      feedback: data['feedback'] != null 
+          ? Map<String, dynamic>.from(data['feedback']) 
           : null,
     );
   }
 
-  // Convert to JSON
-  Map<String, dynamic> toJson() {
+  // Factory constructor from Map
+  factory Booking.fromMap(Map<String, dynamic> data, String id) {
+    return Booking(
+      id: id,
+      userId: data['userId'] ?? '',
+      parkingSpotId: data['parkingSpotId'] ?? '',
+      parkingSpotName: data['parkingSpotName'] ?? '',
+      vehicleId: data['vehicleId'] ?? '',
+      latitude: data['latitude']?.toDouble() ?? 0.0,
+      longitude: data['longitude']?.toDouble() ?? 0.0,
+      startTime: (data['startTime'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      endTime: (data['endTime'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      pricePerHour: data['pricePerHour']?.toDouble() ?? 0.0,
+      totalPrice: data['totalPrice']?.toDouble() ?? 0.0,
+      cancellationFee: data['cancellationFee']?.toDouble(),
+      status: _parseStatus(data['status']),
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      updatedAt: (data['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      qrCode: data['qrCode'],
+      paymentInfo: Map<String, dynamic>.from(data['paymentInfo'] ?? {}),
+      notes: data['notes'],
+      notifications: _parseStringList(data['notifications']),
+      checkedInAt: (data['checkedInAt'] as Timestamp?)?.toDate(),
+      checkedOutAt: (data['checkedOutAt'] as Timestamp?)?.toDate(),
+      feedback: data['feedback'] != null 
+          ? Map<String, dynamic>.from(data['feedback']) 
+          : null,
+    );
+  }
+
+  // Convert to Map for Firestore
+  Map<String, dynamic> toMap() {
     return {
-      '_id': id, // Keep as is (ObjectId or String)
       'userId': userId,
       'parkingSpotId': parkingSpotId,
       'parkingSpotName': parkingSpotName,
-      'location': {
-        'type': 'Point',
-        'coordinates': [longitude, latitude],
-      },
-      'startTime': startTime.toIso8601String(),
-      'endTime': endTime.toIso8601String(),
+      'vehicleId': vehicleId,
+      'latitude': latitude,
+      'longitude': longitude,
+      'startTime': Timestamp.fromDate(startTime),
+      'endTime': Timestamp.fromDate(endTime),
+      'pricePerHour': pricePerHour,
       'totalPrice': totalPrice,
-      'status': status,
-      'createdAt': createdAt.toIso8601String(),
-      if (updatedAt != null) 'updatedAt': updatedAt!.toIso8601String(),
+      'cancellationFee': cancellationFee,
+      'status': status.name,
+      'createdAt': Timestamp.fromDate(createdAt),
+      'updatedAt': Timestamp.fromDate(updatedAt),
+      'qrCode': qrCode,
+      'paymentInfo': paymentInfo,
+      'notes': notes,
+      'notifications': notifications,
+      'checkedInAt': checkedInAt != null ? Timestamp.fromDate(checkedInAt!) : null,
+      'checkedOutAt': checkedOutAt != null ? Timestamp.fromDate(checkedOutAt!) : null,
+      'feedback': feedback,
     };
   }
-  
-  // Helper method to get ID as hex string safely
-  String idToHexString() {
-    if (id is ObjectId) {
-      return (id as ObjectId).toHexString();
-    } else if (id is String) {
-      return id as String;
-    } else {
-      return id.toString();
+
+  // Helper method to parse status from string
+  static BookingStatus _parseStatus(String? statusString) {
+    switch (statusString) {
+      case 'confirmed':
+        return BookingStatus.confirmed;
+      case 'active':
+        return BookingStatus.active;
+      case 'completed':
+        return BookingStatus.completed;
+      case 'cancelled':
+        return BookingStatus.cancelled;
+      case 'expired':
+        return BookingStatus.expired;
+      default:
+        return BookingStatus.pending;
     }
   }
-  
+
+  // Helper method to safely parse List<String> from dynamic data
+  static List<String> _parseStringList(dynamic data) {
+    if (data == null) return [];
+    if (data is List) {
+      return data.map((e) => e?.toString() ?? '').where((s) => s.isNotEmpty).toList();
+    }
+    return [];
+  }
+
+  // Copy with method for updates
+  Booking copyWith({
+    String? userId,
+    String? parkingSpotId,
+    String? parkingSpotName,
+    String? vehicleId,
+    double? latitude,
+    double? longitude,
+    DateTime? startTime,
+    DateTime? endTime,
+    double? pricePerHour,
+    double? totalPrice,
+    double? cancellationFee,
+    BookingStatus? status,
+    DateTime? updatedAt,
+    String? qrCode,
+    Map<String, dynamic>? paymentInfo,
+    String? notes,
+    List<String>? notifications,
+    DateTime? checkedInAt,
+    DateTime? checkedOutAt,
+    Map<String, dynamic>? feedback,
+  }) {
+    return Booking(
+      id: id,
+      userId: userId ?? this.userId,
+      parkingSpotId: parkingSpotId ?? this.parkingSpotId,
+      parkingSpotName: parkingSpotName ?? this.parkingSpotName,
+      vehicleId: vehicleId ?? this.vehicleId,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
+      pricePerHour: pricePerHour ?? this.pricePerHour,
+      totalPrice: totalPrice ?? this.totalPrice,
+      cancellationFee: cancellationFee ?? this.cancellationFee,
+      status: status ?? this.status,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? DateTime.now(),
+      qrCode: qrCode ?? this.qrCode,
+      paymentInfo: paymentInfo ?? this.paymentInfo,
+      notes: notes ?? this.notes,
+      notifications: notifications ?? this.notifications,
+      checkedInAt: checkedInAt ?? this.checkedInAt,
+      checkedOutAt: checkedOutAt ?? this.checkedOutAt,
+      feedback: feedback ?? this.feedback,
+    );
+  }
+
   // Get duration in hours and minutes
   String get durationText {
     final durationMinutes = endTime.difference(startTime).inMinutes;
@@ -161,12 +241,72 @@ class Booking {
            '${endTime.hour.toString().padLeft(2, '0')}:${endTime.minute.toString().padLeft(2, '0')}';
   }
   
-  // Is the booking active?
-  bool get isActive => status == 'active';
+  // Status check methods
+  bool get isPending => status == BookingStatus.pending;
+  bool get isConfirmed => status == BookingStatus.confirmed;
+  bool get isActive => status == BookingStatus.active;
+  bool get isCompleted => status == BookingStatus.completed;
+  bool get isCancelled => status == BookingStatus.cancelled;
+  bool get isExpired => status == BookingStatus.expired;
   
-  // Is the booking completed?
-  bool get isCompleted => status == 'completed';
+  // Check if booking can be cancelled
+  bool canBeCancelled() {
+    if (isCancelled || isCompleted || isExpired) return false;
+    
+    final now = DateTime.now();
+    final timeDifference = startTime.difference(now).inMinutes;
+    
+    // Can cancel if more than 60 minutes before start time
+    return timeDifference > 60;
+  }
   
-  // Is the booking cancelled?
-  bool get isCancelled => status == 'cancelled';
+  // Check if booking can be modified
+  bool canBeModified() {
+    if (isCancelled || isCompleted || isExpired || isActive) return false;
+    
+    final now = DateTime.now();
+    final timeDifference = startTime.difference(now).inHours;
+    
+    // Can modify if more than 2 hours before start time
+    return timeDifference > 2;
+  }
+  
+  // Calculate refund amount
+  double getRefundAmount() {
+    if (!canBeCancelled()) return 0.0;
+    
+    final now = DateTime.now();
+    final hoursUntilStart = startTime.difference(now).inHours;
+    
+    if (hoursUntilStart > 24) {
+      return totalPrice; // Full refund
+    } else if (hoursUntilStart > 2) {
+      return totalPrice * 0.8; // 80% refund
+    } else {
+      return totalPrice * 0.5; // 50% refund
+    }
+  }
+  
+  // Check if booking is happening now
+  bool get isHappeningNow {
+    final now = DateTime.now();
+    return now.isAfter(startTime) && now.isBefore(endTime);
+  }
+  
+  // Check if booking is upcoming
+  bool get isUpcoming {
+    final now = DateTime.now();
+    return now.isBefore(startTime);
+  }
+  
+  // Check if booking is past
+  bool get isPast {
+    final now = DateTime.now();
+    return now.isAfter(endTime);
+  }
+
+  @override
+  String toString() {
+    return 'Booking{id: $id, parkingSpot: $parkingSpotName, status: $status, startTime: $startTime}';
+  }
 }

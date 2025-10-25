@@ -8,6 +8,7 @@ import 'package:smart_parking_app/providers/booking_provider.dart';
 import 'package:smart_parking_app/screens/parking/id_generator.dart';
 import 'package:smart_parking_app/screens/parking/parking_directions_screen.dart';
 import 'package:smart_parking_app/widgets/common/loading_indicator.dart';
+import 'package:smart_parking_app/services/pdf_manager.dart';
 import 'package:smart_parking_app/models/parking_spot.dart';
 
 class BookingHistoryScreen extends StatefulWidget {
@@ -47,7 +48,7 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> with Single
       return;
     }
     
-    final userId = authProvider.currentUser!.id.toHexString();
+    final userId = authProvider.currentUser!.id;
     
     // Load active bookings
     await bookingProvider.loadActiveBookings(userId);
@@ -93,15 +94,23 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> with Single
   
   Widget _buildBookingCard(Booking booking) {
     final parkingSpot = ParkingSpot(
-      id: ObjectIdLike(booking.parkingSpotId),
+      id: booking.parkingSpotId,
       name: booking.parkingSpotName,
-      description: '', // Not available from booking
+      description: 'Booked parking spot',
+      address: '', // Not available from booking
       latitude: booking.latitude,
       longitude: booking.longitude,
       totalSpots: 0, // Not available from booking
       availableSpots: 0, // Not available from booking
       pricePerHour: booking.totalPrice / (booking.endTime.difference(booking.startTime).inHours == 0 ? 1 : booking.endTime.difference(booking.startTime).inHours),
-      features: [], // Not available from booking
+      amenities: [], // Not available from booking
+      operatingHours: {},
+      vehicleTypes: ['car'],
+      ownerId: '',
+      geoPoint: null,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+      isVerified: true,
     );
     
     // Status color based on booking status
@@ -323,7 +332,7 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> with Single
                   _buildDetailRow(
                     context,
                     'Booking ID',
-                    booking.id.toHexString(),
+                    booking.id,
                   ),
                   _buildDivider(),
                   _buildDetailRow(
@@ -351,6 +360,20 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> with Single
                     isHighlighted: true,
                   ),
                   SizedBox(height: 32),
+                  
+                  // Receipt button (always available)
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _generateReceipt(booking),
+                      icon: const Icon(Icons.receipt_long),
+                      label: const Text('GENERATE RECEIPT'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   
                   // Action buttons
                   if (booking.isActive) ...[
@@ -399,6 +422,24 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> with Single
     );
   }
   
+  Future<void> _generateReceipt(Booking booking) async {
+    try {
+      await PdfManager.generateBookingReceipt(
+        context: context,
+        booking: booking,
+        transactionId: DateTime.now().millisecondsSinceEpoch.toString(),
+        paymentMethod: 'Digital Payment',
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to generate receipt: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _cancelBooking(Booking booking) async {
     // Show confirmation dialog
     final confirmed = await showDialog<bool>(
@@ -448,26 +489,22 @@ class _BookingHistoryScreenState extends State<BookingHistoryScreen> with Single
     
     try {
       final bookingProvider = Provider.of<BookingProvider>(context, listen: false);
-      final success = await bookingProvider.cancelBooking(booking.id.toHexString());
+      await bookingProvider.cancelBookingWithReceipt(
+        context,
+        booking.id,
+        refundReason: 'Booking cancelled by user',
+      );
       
       // Close loading dialog
       Navigator.pop(context);
       
-      if (success) {
-        ScaffoldMessenger.of(context).showSnackBar(
+      // Assume success if no exception was thrown
+      ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Booking cancelled successfully'),
             backgroundColor: Colors.green,
           ),
         );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to cancel booking'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
     } catch (e) {
       // Close loading dialog
       Navigator.pop(context);

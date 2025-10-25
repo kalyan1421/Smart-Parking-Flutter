@@ -1,247 +1,222 @@
-// lib/services/parking_service.dart
-import 'dart:async';
-import 'dart:math';
-import 'package:smart_parking_app/models/parking_spot.dart';
-import 'package:smart_parking_app/screens/parking/id_generator.dart';
+// lib/providers/parking_service.dart - Mock parking data service
+import '../models/parking_spot.dart';
+import '../config/app_config.dart';
 
 class ParkingService {
-  // Mock data for demo purposes
-  final List<ParkingSpot> _mockParkingSpots = [];
-  final Random _random = Random();
+  static List<ParkingSpot> _mockParkingSpots = [];
 
-  ParkingService() {
-    // Initialize with some mock data
-    _initializeMockData();
-  }
+  // Initialize mock parking spots for testing
+  static Future<void> initializeMockData() async {
+    if (_mockParkingSpots.isNotEmpty) return; // Already initialized
 
-  void _initializeMockData() {
-    // Add some mock parking spots in various locations
-    // These would normally come from an API
-    
-    // Clear existing mock data
-    _mockParkingSpots.clear();
-    
-    // Helper to create mock ObjectId
-    dynamic createMockId(String value) {
-      return ObjectIdLike(value);
-    }
-    
     _mockParkingSpots.addAll([
       ParkingSpot(
-        id: createMockId('spot001'),
+        id: 'spot001',
         name: 'Downtown Parking Garage',
         description: 'Covered parking in the heart of downtown',
-        latitude: 37.7749, // Sample coordinates - would be adjusted based on user location
+        address: '123 Main St, Downtown',
+        latitude: 37.7749,
         longitude: -122.4194,
         totalSpots: 150,
         availableSpots: 42,
         pricePerHour: 4.50,
-        features: ['Covered', 'Security', 'EV Charging'],
+        amenities: ['covered', 'security', 'electric_charging'],
+        operatingHours: {
+          'monday': {'open': '06:00', 'close': '22:00'},
+          'tuesday': {'open': '06:00', 'close': '22:00'},
+          'wednesday': {'open': '06:00', 'close': '22:00'},
+          'thursday': {'open': '06:00', 'close': '22:00'},
+          'friday': {'open': '06:00', 'close': '23:00'},
+          'saturday': {'open': '08:00', 'close': '23:00'},
+          'sunday': {'open': '08:00', 'close': '21:00'},
+        },
+        vehicleTypes: ['car', 'electric_car'],
+        ownerId: 'owner001',
+        geoPoint: null, // Will be set by GeoFlutterFire
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        isVerified: true,
       ),
       ParkingSpot(
-        id: createMockId('spot002'),
+        id: 'spot002',
         name: 'Main Street Lot',
         description: 'Convenient open-air parking near shopping',
-        latitude: 37.7750, // Sample coordinates - would be adjusted based on user location
+        address: '456 Main St, Shopping District',
+        latitude: 37.7750,
         longitude: -122.4180,
         totalSpots: 80,
         availableSpots: 15,
         pricePerHour: 3.00,
-        features: ['Open 24/7', 'Surveillance'],
+        amenities: ['cctv', '24_7_access'],
+        operatingHours: {
+          'monday': {'open': '00:00', 'close': '23:59'},
+          'tuesday': {'open': '00:00', 'close': '23:59'},
+          'wednesday': {'open': '00:00', 'close': '23:59'},
+          'thursday': {'open': '00:00', 'close': '23:59'},
+          'friday': {'open': '00:00', 'close': '23:59'},
+          'saturday': {'open': '00:00', 'close': '23:59'},
+          'sunday': {'open': '00:00', 'close': '23:59'},
+        },
+        vehicleTypes: ['car', 'motorcycle'],
+        ownerId: 'owner002',
+        geoPoint: null,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        isVerified: true,
       ),
       ParkingSpot(
-        id: createMockId('spot003'),
+        id: 'spot003',
         name: 'City Center Parking',
         description: 'Premium parking with valet service',
-        latitude: 37.7760, // Sample coordinates - would be adjusted based on user location
-        longitude: -122.4190,
+        address: '789 Center Ave, City Center',
+        latitude: 37.7760,
+        longitude: -122.4170,
         totalSpots: 200,
         availableSpots: 75,
         pricePerHour: 6.00,
-        features: ['Valet', 'Covered', 'Security', 'Car Wash'],
+        amenities: ['valet', 'covered', 'security', 'elevator'],
+        operatingHours: {
+          'monday': {'open': '05:00', 'close': '23:00'},
+          'tuesday': {'open': '05:00', 'close': '23:00'},
+          'wednesday': {'open': '05:00', 'close': '23:00'},
+          'thursday': {'open': '05:00', 'close': '23:00'},
+          'friday': {'open': '05:00', 'close': '24:00'},
+          'saturday': {'open': '06:00', 'close': '24:00'},
+          'sunday': {'open': '07:00', 'close': '22:00'},
+        },
+        vehicleTypes: ['car', 'electric_car', 'suv'],
+        ownerId: 'owner003',
+        geoPoint: null,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        isVerified: true,
       ),
       ParkingSpot(
-        id: createMockId('spot004'),
-        name: 'North Side Parking',
-        description: 'Budget friendly parking option',
-        latitude: 37.7770, // Sample coordinates - would be adjusted based on user location
-        longitude: -122.4175,
-        totalSpots: 60,
-        availableSpots: 0, // Full - no spots available
-        pricePerHour: 2.50,
-        features: ['Open 24/7'],
-      ),
-      ParkingSpot(
-        id: createMockId('spot005'),
-        name: 'Waterfront Parking',
-        description: 'Scenic parking near the bay',
-        latitude: 37.7780, // Sample coordinates - would be adjusted based on user location
-        longitude: -122.4160,
-        totalSpots: 100,
+        id: 'spot004',
+        name: 'Budget Parking Lot',
+        description: 'Affordable parking for budget-conscious drivers',
+        address: '321 Budget St, Outskirts',
+        latitude: 37.7730,
+        longitude: -122.4210,
+        totalSpots: 50,
         availableSpots: 30,
-        pricePerHour: 5.00,
-        features: ['Security', 'Scenic View'],
+        pricePerHour: 2.00,
+        amenities: ['lighting'],
+        operatingHours: {
+          'monday': {'open': '06:00', 'close': '20:00'},
+          'tuesday': {'open': '06:00', 'close': '20:00'},
+          'wednesday': {'open': '06:00', 'close': '20:00'},
+          'thursday': {'open': '06:00', 'close': '20:00'},
+          'friday': {'open': '06:00', 'close': '21:00'},
+          'saturday': {'open': '07:00', 'close': '21:00'},
+          'sunday': {'open': '08:00', 'close': '19:00'},
+        },
+        vehicleTypes: ['car', 'motorcycle', 'bicycle'],
+        ownerId: 'owner004',
+        geoPoint: null,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        isVerified: false,
+      ),
+      ParkingSpot(
+        id: 'spot005',
+        name: 'Electric Vehicle Hub',
+        description: 'Specialized parking for electric vehicles with charging stations',
+        address: '555 Green Ave, Tech District',
+        latitude: 37.7770,
+        longitude: -122.4160,
+        totalSpots: 60,
+        availableSpots: 25,
+        pricePerHour: 5.50,
+        amenities: ['electric_charging', 'covered', 'security', 'cctv'],
+        operatingHours: {
+          'monday': {'open': '00:00', 'close': '23:59'},
+          'tuesday': {'open': '00:00', 'close': '23:59'},
+          'wednesday': {'open': '00:00', 'close': '23:59'},
+          'thursday': {'open': '00:00', 'close': '23:59'},
+          'friday': {'open': '00:00', 'close': '23:59'},
+          'saturday': {'open': '00:00', 'close': '23:59'},
+          'sunday': {'open': '00:00', 'close': '23:59'},
+        },
+        vehicleTypes: ['electric_car'],
+        ownerId: 'owner005',
+        geoPoint: null,
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+        isVerified: true,
       ),
     ]);
   }
 
-  // Find nearby parking spots with a given radius in kilometers
-  Future<List<ParkingSpot>> findNearbyParkingSpots(
-    double latitude, 
-    double longitude, 
-    {double radius = 1.0}
-  ) async {
-    // In a real app, this would make an API call
-    // For now, we'll simulate network delay and return mock data
-    
-    await Future.delayed(Duration(milliseconds: 800)); // Simulate network delay
-    
-    // Adjust the mock data to be near the user's location
-    for (var spot in _mockParkingSpots) {
-      // Create new coordinates based on user location plus some random offset
-      // This ensures the spots are always near the user for demo purposes
-      final latOffset = (_random.nextDouble() * 0.01) * (_random.nextBool() ? 1 : -1);
-      final lngOffset = (_random.nextDouble() * 0.01) * (_random.nextBool() ? 1 : -1);
-      
-      final updatedSpot = spot.copyWith(
-        latitude: latitude + latOffset,
-        longitude: longitude + lngOffset,
-      );
-      
-      // Update the spot in the list
-      final index = _mockParkingSpots.indexOf(spot);
-      _mockParkingSpots[index] = updatedSpot;
-    }
-    
-    // Return spots within radius (for mock, we'll return all)
-    return _mockParkingSpots;
+  // Get all mock parking spots
+  static List<ParkingSpot> getAllParkingSpots() {
+    return List.from(_mockParkingSpots);
   }
 
-  // Book a parking spot
-  Future<bool> bookParkingSpot(
-    String spotId, 
-    DateTime startTime, 
-    DateTime endTime
+  // Get parking spots near a location (simplified for mock data)
+  static List<ParkingSpot> getParkingSpotsNear(
+    double latitude,
+    double longitude,
+    double radiusInMeters,
+  ) {
+    // For mock data, just return all spots
+    // In a real implementation, this would filter by distance
+    return getAllParkingSpots();
+  }
+
+  // Update parking spot availability
+  static Future<bool> updateParkingSpotAvailability(
+    String spotId,
+    int newAvailableSpots,
   ) async {
-    // In a real app, this would make an API call
-    // For now, we'll simulate network delay and update mock data
-    
-    await Future.delayed(Duration(milliseconds: 700)); // Simulate network delay
-    
-    // Find the spot by ID
-    final spotIndex = _mockParkingSpots.indexWhere(
-      (spot) => spot.id.toHexString() == spotId
-    );
-    
-    if (spotIndex >= 0) {
-      final spot = _mockParkingSpots[spotIndex];
-      
-      // Check if there are spots available
-      if (spot.availableSpots <= 0) {
-        return false; // No spots available
+    try {
+      final spotIndex = _mockParkingSpots.indexWhere((spot) => spot.id == spotId);
+      if (spotIndex != -1) {
+        final spot = _mockParkingSpots[spotIndex];
+        _mockParkingSpots[spotIndex] = ParkingSpot(
+          id: spot.id,
+          name: spot.name,
+          description: spot.description,
+          address: spot.address,
+          latitude: spot.latitude,
+          longitude: spot.longitude,
+          totalSpots: spot.totalSpots,
+          availableSpots: newAvailableSpots,
+          pricePerHour: spot.pricePerHour,
+          amenities: spot.amenities,
+          operatingHours: spot.operatingHours,
+          vehicleTypes: spot.vehicleTypes,
+          ownerId: spot.ownerId,
+          geoPoint: spot.geoPoint,
+          createdAt: spot.createdAt,
+          updatedAt: DateTime.now(),
+          isVerified: spot.isVerified,
+        );
+        return true;
       }
-      
-      // Update available spots
-      final updatedSpot = spot.copyWith(
-        availableSpots: spot.availableSpots - 1
-      );
-      
-      _mockParkingSpots[spotIndex] = updatedSpot;
-      
-      // In a real app, this would also create a booking record
-      
-      return true; // Booking successful
+      return false;
+    } catch (e) {
+      return false;
     }
-    
-    return false; // Spot not found
   }
 
-  // Cancel a booking
-  Future<bool> cancelBooking(String bookingId) async {
-    // In a real app, this would make an API call to cancel the booking
-    // and update the available spots for the associated parking spot
-    // For now, we'll simulate network delay and return success
-    
-    await Future.delayed(Duration(milliseconds: 600)); // Simulate network delay
-    
-    // In a real app, you would get the spot ID from the booking
-    // For now, we'll assume the booking is successful
-    
-    return true; // Cancellation successful
+  // Add a new parking spot
+  static Future<bool> addParkingSpot(ParkingSpot spot) async {
+    try {
+      _mockParkingSpots.add(spot);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
-  
-  // Get user's booking history
-  Future<List<Map<String, dynamic>>> getUserBookingHistory() async {
-    // In a real app, this would make an API call to get the user's booking history
-    // For now, we'll simulate network delay and return mock data
-    
-    await Future.delayed(Duration(milliseconds: 900)); // Simulate network delay
-    
-    // Return mock booking history
-    return [
-      {
-        'id': 'booking123',
-        'spotId': 'spot001',
-        'spotName': 'Downtown Parking Garage',
-        'startTime': DateTime.now().subtract(Duration(days: 2)),
-        'endTime': DateTime.now().subtract(Duration(days: 2, hours: 2)),
-        'price': 9.00,
-        'status': 'completed',
-      },
-      {
-        'id': 'booking456',
-        'spotId': 'spot003',
-        'spotName': 'City Center Parking',
-        'startTime': DateTime.now().subtract(Duration(days: 1)),
-        'endTime': DateTime.now().subtract(Duration(days: 1, hours: 3)),
-        'price': 18.00,
-        'status': 'completed',
-      },
-    ];
-  }
-  
-  // Search for parking spots by name or location
-  Future<List<ParkingSpot>> searchParkingSpots(String query) async {
-    // In a real app, this would make an API call to search for parking spots
-    // For now, we'll simulate network delay and filter mock data
-    
-    await Future.delayed(Duration(milliseconds: 700)); // Simulate network delay
-    
-    // Filter spots by name or description
-    final filteredSpots = _mockParkingSpots.where((spot) {
-      return spot.name.toLowerCase().contains(query.toLowerCase()) ||
-             spot.description.toLowerCase().contains(query.toLowerCase());
-    }).toList();
-    
-    return filteredSpots;
-  }
-  
-  // Get parking spot details by ID
-  Future<ParkingSpot?> getParkingSpotById(String spotId) async {
-    // In a real app, this would make an API call to get spot details
-    // For now, we'll simulate network delay and return from mock data
-    
-    await Future.delayed(Duration(milliseconds: 500)); // Simulate network delay
-    
-    // Find the spot by ID
-    final spot = _mockParkingSpots.firstWhere(
-      (spot) => spot.id.toHexString() == spotId,
-      orElse: () => null as ParkingSpot, // This will throw an error if not found
-    );
-    
-    return spot;
-  }
-  
-  // Rate a parking spot
-  Future<bool> rateParkingSpot(String spotId, int rating, String? comment) async {
-    // In a real app, this would make an API call to rate the spot
-    // For now, we'll simulate network delay and return success
-    
-    await Future.delayed(Duration(milliseconds: 600)); // Simulate network delay
-    
-    // In a real app, you would store the rating and comment
-    // For now, we'll just return success
-    
-    return true; // Rating successful
+
+  // Remove a parking spot
+  static Future<bool> removeParkingSpot(String spotId) async {
+    try {
+      _mockParkingSpots.removeWhere((spot) => spot.id == spotId);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 }

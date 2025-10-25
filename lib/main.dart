@@ -1,25 +1,25 @@
-// lib/main.dart - Updated with BookingProvider
+// lib/main.dart - Firebase-based Smart Parking App
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:smart_parking_app/config/routes.dart';
-import 'package:smart_parking_app/config/theme.dart';
-import 'package:smart_parking_app/core/database/database_service.dart';
-import 'package:smart_parking_app/providers/auth_provider.dart';
-import 'package:smart_parking_app/providers/booking_provider.dart';
-import 'package:smart_parking_app/providers/location_provider.dart';
-import 'package:smart_parking_app/providers/parking_provider.dart';
-import 'package:smart_parking_app/providers/parking_service.dart';
-import 'package:smart_parking_app/providers/traffic_provider.dart';
-import 'package:smart_parking_app/providers/routing_provider.dart';
-import 'package:smart_parking_app/repositories/booking_repository.dart';
-import 'package:smart_parking_app/screens/auth/login_screen.dart';
-import 'package:smart_parking_app/screens/home/home_screen.dart';
-import 'package:smart_parking_app/widgets/common/loading_indicator.dart';
+import 'config/routes.dart';
+import 'config/theme.dart';
+import 'core/database/database_service.dart';
+import 'providers/auth_provider.dart';
+import 'providers/booking_provider.dart';
+import 'providers/location_provider.dart';
+import 'providers/parking_provider.dart';
+import 'providers/traffic_provider.dart';
+import 'providers/routing_provider.dart';
+import 'repositories/booking_repository.dart';
+import 'screens/auth/login_screen.dart';
+import 'screens/home/home_screen.dart';
+import 'widgets/common/loading_indicator.dart';
+import 'screens/auth/complete_profile_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // Initialize MongoDB connection
+  // Initialize Firebase services
   await DatabaseService.init();
   
   runApp(MyApp());
@@ -30,22 +30,17 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        // Core providers
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => LocationProvider()),
         ChangeNotifierProvider(create: (_) => TrafficProvider()),
         ChangeNotifierProvider(create: (_) => RoutingProvider()),
+        ChangeNotifierProvider(create: (_) => ParkingProvider()),
         
         // Initialize repositories
         Provider(create: (_) => BookingRepository()),
         
-        // Initialize services
-        Provider(create: (_) => ParkingService()),
-        
-        // Initialize providers that depend on services/repositories
-        ChangeNotifierProxyProvider<ParkingService, ParkingProvider>(
-          create: (context) => ParkingProvider(context.read<ParkingService>()),
-          update: (context, service, previous) => previous ?? ParkingProvider(service),
-        ),
+        // Initialize providers that depend on repositories
         ChangeNotifierProxyProvider<BookingRepository, BookingProvider>(
           create: (context) => BookingProvider(context.read<BookingRepository>()),
           update: (context, repository, previous) => previous ?? BookingProvider(repository),
@@ -167,9 +162,23 @@ class _MyAppContentState extends State<MyAppContent> {
           title: 'Smart Parking',
           theme: AppTheme.lightTheme,
           routes: AppRoutes.routes,
-          home: authProvider.isLoggedIn ? HomeScreen() : LoginScreen(),
+          home: _getHomeScreen(authProvider),
         );
       },
     );
+  }
+
+  Widget _getHomeScreen(AuthProvider authProvider) {
+    if (!authProvider.isLoggedIn) {
+      return LoginScreen();
+    }
+    
+    // If logged in but profile incomplete, show profile completion
+    if (!authProvider.isProfileComplete) {
+      return CompleteProfileScreen();
+    }
+    
+    // Otherwise show home screen
+    return HomeScreen();
   }
 }

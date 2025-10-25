@@ -66,7 +66,7 @@ class RoutingProvider with ChangeNotifier {
         '&mode=driving'       // Travel mode (driving, walking, bicycling, transit)
         '&departure_time=now' // Use current time for traffic consideration
         '&traffic_model=best_guess' // Traffic model (best_guess, pessimistic, optimistic)
-        '&key=${AppConstants.googleMapsApiKey}';
+        '&key=YOUR_GOOGLE_MAPS_API_KEY';
     
     final response = await http.get(Uri.parse(url));
     

@@ -1,30 +1,56 @@
-
-// lib/config/constants.dart - App constants
+// lib/config/constants.dart
 class AppConstants {
-  // MongoDB connection
-  static const String mongoDbUrl = 'mongodb+srv://kalyan91333:N0K0tSsQLTV7D093@cluster0.x5ivq.mongodb.net/trafficdb'; // Use environment variables in production
-  static const String googleMapsApiKey  ='AIzaSyA3TG94CbG-lUzrgusZggVrOPEaZ9DD3D0';
   // Collection names
   static const String usersCollection = 'users';
-  static const String parkingAreasCollection = 'parking_areas';
-  static const String parkingSlotsCollection = 'parking_slots';
   static const String bookingsCollection = 'bookings';
-  static const String trafficDataCollection = 'traffic_data';
+  static const String parkingSpotsCollection = 'parking_spots';
+  static const String vehiclesCollection = 'vehicles';
+  static const String notificationsCollection = 'notifications';
+  static const String reviewsCollection = 'reviews';
+  
+  // App constants
+  static const String appName = 'Smart Parking';
+  static const String appVersion = '1.0.0';
+  
+  // Default values
+  static const double defaultSearchRadius = 2000.0; // meters
+  static const int defaultBookingDuration = 2; // hours
+  static const double defaultCancellationFeePercentage = 0.1; // 10%
   
   // Map settings
-  static const double defaultZoom = 14.0;
-  static const double defaultLat = 37.7749; // Default latitude
-  static const double defaultLng = -122.4194; // Default longitude
+  static const double defaultZoom = 15.0;
+  static const double defaultLat = 37.7749;
+  static const double defaultLng = -122.4194;
   
-  // Parking status
-  static const String statusAvailable = 'available';
-  static const String statusReserved = 'reserved';
-  static const String statusOccupied = 'occupied';
+  // API Keys (to be replaced with actual keys)
+  static const String googleMapsApiKey = 'YOUR_GOOGLE_MAPS_API_KEY';
+  static const String openWeatherApiKey = 'YOUR_OPENWEATHER_API_KEY';
   
-  // Booking status
-  static const String bookingPending = 'pending';
-  static const String bookingConfirmed = 'confirmed';
-  static const String bookingCheckedIn = 'checked_in';
-  static const String bookingCompleted = 'completed';
-  static const String bookingCancelled = 'cancelled';
+  // Additional collection names
+  static const String trafficDataCollection = 'traffic_data';
+  
+  // Supported vehicle types
+  static const List<String> vehicleTypes = [
+    'car',
+    'motorcycle',
+    'bicycle',
+    'electricCar',
+    'truck',
+    'van',
+    'suv'
+  ];
+  
+  // Supported amenities
+  static const List<String> parkingAmenities = [
+    'covered',
+    'electric_charging',
+    'security',
+    'cctv',
+    'disabled_access',
+    'car_wash',
+    'valet',
+    'lighting',
+    'elevator',
+    '24_7_access'
+  ];
 }

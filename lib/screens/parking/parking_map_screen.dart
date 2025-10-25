@@ -8,10 +8,11 @@ import 'package:smart_parking_app/providers/parking_provider.dart';
 import 'package:smart_parking_app/providers/traffic_provider.dart';
 import 'package:smart_parking_app/models/parking_spot.dart';
 import 'package:smart_parking_app/screens/parking/parking_spot_bottom_sheet.dart';
-import 'package:smart_parking_app/screens/parking/add_parking_spot_dialog.dart';
 import 'package:smart_parking_app/widgets/common/loading_indicator.dart';
 
 class ParkingMapScreen extends StatefulWidget {
+  const ParkingMapScreen({super.key});
+
   @override
   _ParkingMapScreenState createState() => _ParkingMapScreenState();
 }
@@ -19,9 +20,6 @@ class ParkingMapScreen extends StatefulWidget {
 class _ParkingMapScreenState extends State<ParkingMapScreen> {
   GoogleMapController? _mapController;
   Set<Marker> _markers = {};
-  bool _mapLoaded = false;
-  bool _isAddingParkingSpot = false;
-  LatLng? _selectedLocation;
   
   @override
   void initState() {
@@ -75,7 +73,7 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
     // Create marker for each parking spot
     for (final spot in spots) {
       markers.add(Marker(
-        markerId: MarkerId(spot.id.toHexString()),
+        markerId: MarkerId(spot.id),
         position: LatLng(spot.latitude, spot.longitude),
         infoWindow: InfoWindow(
           title: spot.name,
@@ -104,19 +102,6 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
       ));
     }
     
-    // Add temporary marker for new parking spot if in adding mode
-    if (_isAddingParkingSpot && _selectedLocation != null) {
-      markers.add(Marker(
-        markerId: MarkerId('new_parking_spot'),
-        position: _selectedLocation!,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
-        infoWindow: InfoWindow(
-          title: 'New Parking Spot',
-          snippet: 'Tap to add details',
-        ),
-        onTap: () => _showAddParkingDialog(_selectedLocation!),
-      ));
-    }
     
     setState(() {
       _markers = markers;
@@ -124,9 +109,6 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
   }
   
   void _onMarkerTapped(ParkingSpot spot) {
-    // If in adding mode, ignore regular marker taps
-    if (_isAddingParkingSpot) return;
-    
     final parkingProvider = Provider.of<ParkingProvider>(context, listen: false);
     parkingProvider.selectParkingSpot(spot);
     
@@ -141,62 +123,7 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
     );
   }
   
-  void _startAddingParkingSpot() {
-    setState(() {
-      _isAddingParkingSpot = true;
-      _selectedLocation = null;
-    });
-    
-    // Show a snackbar with instructions
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Tap on the map to place a new parking spot'),
-        duration: Duration(seconds: 5),
-        action: SnackBarAction(
-          label: 'Cancel',
-          onPressed: _cancelAddingParkingSpot,
-        ),
-      ),
-    );
-  }
-  
-  void _cancelAddingParkingSpot() {
-    setState(() {
-      _isAddingParkingSpot = false;
-      _selectedLocation = null;
-    });
-    _updateMarkers();
-  }
-  
-  void _showAddParkingDialog(LatLng location) {
-    showDialog(
-      context: context,
-      builder: (context) => AddParkingSpotDialog(
-        location: location,
-        onSave: (newSpot) {
-          _addNewParkingSpot(newSpot);
-        },
-      ),
-    ).then((_) {
-      _cancelAddingParkingSpot();
-    });
-  }
-  
-  Future<void> _addNewParkingSpot(ParkingSpot newSpot) async {
-    final parkingProvider = Provider.of<ParkingProvider>(context, listen: false);
-    await parkingProvider.addParkingSpot(newSpot);
-    
-    // Refresh the markers
-    _updateMarkers();
-    
-    // Show success message
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('New parking spot added successfully!'),
-        backgroundColor: Colors.green,
-      ),
-    );
-  }
+  // Parking spot addition is now handled by admin app only
   
   @override
   Widget build(BuildContext context) {
@@ -280,7 +207,6 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
                   onMapCreated: (controller) {
                     setState(() {
                       _mapController = controller;
-                      _mapLoaded = true;
                     });
                     
                     // Initial load if we have location
@@ -296,22 +222,13 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
                       ));
                     }
                   },
-                  onTap: (LatLng location) {
-                    if (_isAddingParkingSpot) {
-                      setState(() {
-                        _selectedLocation = location;
-                      });
-                      _updateMarkers();
-                      _showAddParkingDialog(location);
-                    }
-                  },
                 ),
                 
                 // Loading indicator
                 if (parkingProvider.isLoading)
                   Positioned.fill(
                     child: Container(
-                      color: Colors.black.withOpacity(0.3),
+                      color: Colors.black.withValues(alpha: 0.3),
                       child: Center(
                         child: LoadingIndicator(),
                       ),
@@ -363,7 +280,7 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: Colors.black.withValues(alpha: 0.1),
                           blurRadius: 8,
                           offset: Offset(0, 2),
                         ),
@@ -379,33 +296,7 @@ class _ParkingMapScreenState extends State<ParkingMapScreen> {
                   ),
                 ),
                 
-                // Add parking spot button (visible only when not in adding mode)
-                if (!_isAddingParkingSpot)
-                  Positioned(
-                    bottom: 90,
-                    right: 16,
-                    child: FloatingActionButton(
-                      onPressed: _startAddingParkingSpot,
-                      child: Icon(Icons.add_location),
-                      tooltip: 'Add Parking Space',
-                      heroTag: 'add_parking',
-                      backgroundColor: Theme.of(context).colorScheme.secondary,
-                    ),
-                  ),
-                
-                // Cancel adding button (visible only when in adding mode)
-                if (_isAddingParkingSpot)
-                  Positioned(
-                    bottom: 90,
-                    right: 16,
-                    child: FloatingActionButton(
-                      onPressed: _cancelAddingParkingSpot,
-                      child: Icon(Icons.close),
-                      tooltip: 'Cancel',
-                      heroTag: 'cancel_add_parking',
-                      backgroundColor: Colors.red,
-                    ),
-                  ),
+                // Parking spot addition is handled by admin app only
                 
                 // Traffic legend
                 if (trafficProvider.showTrafficLayer)

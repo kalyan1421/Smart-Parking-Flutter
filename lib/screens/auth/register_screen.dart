@@ -14,23 +14,17 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _nameController = TextEditingController();
-  final _phoneController = TextEditingController();
   bool _obscurePassword = true;
-   bool _obscureConfirmPassword = true;
+  bool _obscureConfirmPassword = true;
   
   @override
   void dispose() {
-    _usernameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _nameController.dispose();
-    _phoneController.dispose();
     super.dispose();
   }
   
@@ -39,15 +33,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
     
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final success = await authProvider.register(
-      _usernameController.text.trim(),
       _emailController.text.trim(),
       _passwordController.text,
-      _nameController.text.trim(),
-      _phoneController.text.trim()
     );
     
     if (success && mounted) {
-      Navigator.pushReplacementNamed(context, AppRoutes.home);
+      // Navigate to profile completion screen if profile is incomplete
+      // Otherwise go to home
+      if (!authProvider.isProfileComplete) {
+        Navigator.pushReplacementNamed(context, AppRoutes.completeProfile);
+      } else {
+        Navigator.pushReplacementNamed(context, AppRoutes.home);
+      }
     }
   }
   
@@ -87,64 +84,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 key: _formKey,
                 child: Column(
                   children: [
-                    // Username field
-                    TextFormField(
-                      controller: _usernameController,
-                      decoration: InputDecoration(
-                        labelText: 'Username',
-                        prefixIcon: Icon(Icons.person),
-                      ),
-                      textInputAction: TextInputAction.next,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Username is required';
-                        }
-                        if (value.length < 3) {
-                          return 'Username must be at least 3 characters';
-                        }
-                        return null;
-                      },
-                    ),
-                    
-                    SizedBox(height: 16),
-                    
                     // Email field
                     TextFormField(
                       controller: _emailController,
                       decoration: InputDecoration(
                         labelText: 'Email',
                         prefixIcon: Icon(Icons.email),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
                       ),
                       keyboardType: TextInputType.emailAddress,
                       textInputAction: TextInputAction.next,
                       validator: Validators.validateEmail,
-                    ),
-                    
-                    SizedBox(height: 16),
-                    
-                    // Full name field
-                    TextFormField(
-                      controller: _nameController,
-                      decoration: InputDecoration(
-                        labelText: 'Full Name',
-                        prefixIcon: Icon(Icons.badge),
-                      ),
-                      textInputAction: TextInputAction.next,
-                      validator: Validators.validateName,
-                    ),
-                    
-                    SizedBox(height: 16),
-                    
-                    // Phone number field
-                    TextFormField(
-                      controller: _phoneController,
-                      decoration: InputDecoration(
-                        labelText: 'Phone Number',
-                        prefixIcon: Icon(Icons.phone),
-                      ),
-                      keyboardType: TextInputType.phone,
-                      textInputAction: TextInputAction.next,
-                      validator: Validators.validatePhone,
                     ),
                     
                     SizedBox(height: 16),
@@ -155,6 +109,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       decoration: InputDecoration(
                         labelText: 'Password',
                         prefixIcon: Icon(Icons.lock),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
                         suffixIcon: IconButton(
                           icon: Icon(
                             _obscurePassword ? Icons.visibility : Icons.visibility_off,
@@ -179,6 +138,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       decoration: InputDecoration(
                         labelText: 'Confirm Password',
                         prefixIcon: Icon(Icons.lock_outline),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
                         suffixIcon: IconButton(
                           icon: Icon(
                             _obscureConfirmPassword ? Icons.visibility : Icons.visibility_off,
@@ -218,6 +182,45 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 'Register',
                                 style: TextStyle(fontSize: 16),
                               ),
+                      ),
+                    ),
+                    
+                    SizedBox(height: 16),
+                    
+                    // OR divider
+                    Row(
+                      children: [
+                        Expanded(child: Divider()),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 16),
+                          child: Text('OR'),
+                        ),
+                        Expanded(child: Divider()),
+                      ],
+                    ),
+                    
+                    SizedBox(height: 16),
+                    
+                    // Google Sign In button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: OutlinedButton.icon(
+                        onPressed: authProvider.isLoading ? null : () async {
+                          final success = await authProvider.signInWithGoogle();
+                          if (success && mounted) {
+                            if (!authProvider.isProfileComplete) {
+                              Navigator.pushReplacementNamed(context, AppRoutes.completeProfile);
+                            } else {
+                              Navigator.pushReplacementNamed(context, AppRoutes.home);
+                            }
+                          }
+                        },
+                        icon: Icon(Icons.login, color: Colors.red),
+                        label: Text('Continue with Google'),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: Colors.grey[300]!),
+                        ),
                       ),
                     ),
                     

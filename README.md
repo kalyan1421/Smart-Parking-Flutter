@@ -1,4 +1,4 @@
-# Smart-Parking-Flutter
+# smart_parking_app
 
 A new Flutter project.
 

@@ -36,8 +36,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void _initializeFields() {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     if (authProvider.currentUser != null) {
-      _nameController.text = authProvider.currentUser!.name;
-      _phoneController.text = authProvider.currentUser!.phoneNumber;
+      _nameController.text = authProvider.currentUser!.displayName;
+      _phoneController.text = authProvider.currentUser!.phoneNumber ?? '';
     }
   }
   
@@ -46,7 +46,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final bookingProvider = Provider.of<BookingProvider>(context, listen: false);
     
     if (authProvider.currentUser != null) {
-      await bookingProvider.loadActiveBookings(authProvider.currentUser!.id.toHexString());
+      await bookingProvider.loadActiveBookings(authProvider.currentUser!.id);
       setState(() {
         _activeBookingsCount = bookingProvider.activeBookings.length;
       });
@@ -170,9 +170,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       radius: 50,
                       backgroundColor: Theme.of(context).primaryColor,
                       child: Text(
-                        authProvider.currentUser!.name.isNotEmpty
-                            ? authProvider.currentUser!.name[0].toUpperCase()
-                            : authProvider.currentUser!.username[0].toUpperCase(),
+                        authProvider.currentUser!.displayName.isNotEmpty
+                            ? authProvider.currentUser!.displayName[0].toUpperCase()
+                            : authProvider.currentUser!.email[0].toUpperCase(),
                         style: TextStyle(
                           fontSize: 40,
                           color: Colors.white,
@@ -182,7 +182,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     SizedBox(height: 16),
                     Text(
-                      authProvider.currentUser!.username,
+                      authProvider.currentUser!.email,
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,

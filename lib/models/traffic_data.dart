@@ -1,6 +1,6 @@
 
 // lib/models/traffic_data.dart - Traffic data model
-import 'package:mongo_dart/mongo_dart.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 enum CongestionLevel {
   low,
@@ -9,7 +9,7 @@ enum CongestionLevel {
 }
 
 class TrafficData {
-  final ObjectId id;
+  final String id;
   final double latitude;
   final double longitude;
   final String locationName;

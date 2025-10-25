@@ -141,7 +141,7 @@ class NetworkTileProvider implements TileProvider {
     }
     
     // Google Maps traffic tile URL format
-    final url = 'https://mt0.google.com/vt/lyrs=m@221097413,traffic&x=$x&y=$y&z=$zoom&key=${AppConstants.googleMapsApiKey}';
+    final url = 'https://mt0.google.com/vt/lyrs=m@221097413,traffic&x=$x&y=$y&z=$zoom&key=YOUR_GOOGLE_MAPS_API_KEY';
     
     try {
       final response = await http.get(Uri.parse(url));

@@ -8,6 +8,7 @@ import 'package:smart_parking_app/providers/auth_provider.dart';
 import 'package:smart_parking_app/providers/booking_provider.dart';
 import 'package:smart_parking_app/screens/parking/parking_directions_screen.dart';
 import 'package:smart_parking_app/widgets/common/loading_indicator.dart';
+import 'package:smart_parking_app/services/pdf_manager.dart';
 
 class BookingConfirmationScreen extends StatefulWidget {
   final ParkingSpot parkingSpot;
@@ -57,7 +58,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen> {
       }
 
       final booking = await bookingProvider.createBooking(
-        authProvider.currentUser!.id.toHexString(),
+        authProvider.currentUser!.id,
         widget.parkingSpot,
         widget.startTime,
         widget.endTime,
@@ -72,6 +73,29 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen> {
         _createdBooking = booking;
         _isSaving = false;
       });
+
+      // Generate PDF receipt after successful booking
+      if (booking != null && mounted) {
+        try {
+          await PdfManager.handleBookingCompletion(
+            context: context,
+            booking: booking,
+            transactionId: DateTime.now().millisecondsSinceEpoch.toString(),
+            paymentMethod: 'Digital Wallet', // This could be dynamic based on payment selection
+          );
+        } catch (e) {
+          // PDF generation failure shouldn't break the booking flow
+          print('PDF generation failed: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Booking confirmed! Receipt generation failed, but you can generate it later.'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+      }
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -218,7 +242,7 @@ class _BookingConfirmationScreenState extends State<BookingConfirmationScreen> {
                               _buildInfoRow(
                                 context, 
                                 'Booking ID', 
-                                _createdBooking?.id?.toHexString() ?? widget.bookingId,
+                                _createdBooking?.id ?? widget.bookingId,
                               ),
                               _buildDivider(),
                               _buildInfoRow(

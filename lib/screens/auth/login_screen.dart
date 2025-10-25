@@ -172,6 +172,45 @@ class _LoginScreenState extends State<LoginScreen> {
                     
                     SizedBox(height: 16),
                     
+                    // OR divider
+                    Row(
+                      children: [
+                        Expanded(child: Divider()),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 16),
+                          child: Text('OR'),
+                        ),
+                        Expanded(child: Divider()),
+                      ],
+                    ),
+                    
+                    SizedBox(height: 16),
+                    
+                    // Google Sign In button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: OutlinedButton.icon(
+                        onPressed: authProvider.isLoading ? null : () async {
+                          final success = await authProvider.signInWithGoogle();
+                          if (success && mounted) {
+                            if (!authProvider.isProfileComplete) {
+                              Navigator.pushReplacementNamed(context, AppRoutes.completeProfile);
+                            } else {
+                              Navigator.pushReplacementNamed(context, AppRoutes.home);
+                            }
+                          }
+                        },
+                        icon: Icon(Icons.login, color: Colors.red),
+                        label: Text('Continue with Google'),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: Colors.grey[300]!),
+                        ),
+                      ),
+                    ),
+                    
+                    SizedBox(height: 16),
+                    
                     // Register button
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,

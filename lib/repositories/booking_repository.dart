@@ -1,13 +1,12 @@
-// lib/repositories/booking_repository.dart
-import 'package:mongo_dart/mongo_dart.dart';
-import 'package:smart_parking_app/config/constants.dart';
-import 'package:smart_parking_app/core/database/database_service.dart';
-import 'package:smart_parking_app/models/booking.dart';
-import 'package:smart_parking_app/models/parking_spot.dart';
+// lib/repositories/booking_repository.dart - Firebase-based booking repository
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/database/database_service.dart';
+import '../models/booking.dart';
+import '../models/parking_spot.dart';
 
 class BookingRepository {
-  final DbCollection _collection = DatabaseService.collection(AppConstants.bookingsCollection);
-  final DbCollection _usersCollection = DatabaseService.collection(AppConstants.usersCollection);
+  final CollectionReference _collection = DatabaseService.collection('bookings');
+  final CollectionReference _usersCollection = DatabaseService.collection('users');
 
   // Create a new booking
   Future<Booking> createBooking(
@@ -17,170 +16,83 @@ class BookingRepository {
     DateTime endTime,
     double totalPrice
   ) async {
-    // Create booking document
-    final bookingId = ObjectId();
-    
-    // Handle userId correctly - parse as ObjectId if possible
-    dynamic userIdObj;
-    try {
-      userIdObj = ObjectId.parse(userId);
-    } catch (e) {
-      // If parsing fails, use as string
-      userIdObj = userId;
-    }
-    
-    final bookingDoc = {
-      '_id': bookingId,
-      'userId': userIdObj,
-      'parkingSpotId': parkingSpot.id.toString(),
-      'parkingSpotName': parkingSpot.name,
-      'location': {
-        'type': 'Point',
-        'coordinates': [parkingSpot.longitude, parkingSpot.latitude],
-      },
-      'startTime': startTime.toIso8601String(),
-      'endTime': endTime.toIso8601String(),
-      'totalPrice': totalPrice,
-      'status': 'active', // active, completed, cancelled
-      'createdAt': DateTime.now().toIso8601String(),
-    };
-    
-    // Insert booking into database
-    await _collection.insert(bookingDoc);
-    
-    // Add booking ID to user's bookings list
-    await _usersCollection.update(
-      userIdObj is ObjectId ? where.id(userIdObj) : where.eq('_id', userIdObj),
-      {
-        r'$push': {
-          'bookingIds': bookingId.toHexString(),
-        }
-      }
-    );
-    
-    // Return booking object
-    return Booking.fromJson(bookingDoc);
+    // This method is now handled by BookingProvider with transactions
+    // Keeping for backward compatibility
+    throw UnimplementedError('Use BookingProvider.createBooking() instead');
   }
   
   // Get all bookings for a user
   Future<List<Booking>> getUserBookings(String userId) async {
-    // Parse userId as ObjectId if possible
-    dynamic userIdObj;
-    try {
-      userIdObj = ObjectId.parse(userId);
-    } catch (e) {
-      userIdObj = userId;
-    }
+    final querySnapshot = await _collection
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .get();
     
-    final bookings = await _collection.find(
-      userIdObj is ObjectId ? where.eq('userId', userIdObj) : where.eq('userId', userIdObj)
-    ).toList();
-    
-    return bookings.map((doc) => Booking.fromJson(doc)).toList();
+    return querySnapshot.docs
+        .map((doc) => Booking.fromFirestore(doc))
+        .toList();
   }
   
   // Get a specific booking by ID
   Future<Booking?> getBookingById(String bookingId) async {
-    // Parse bookingId as ObjectId if possible
-    dynamic bookingIdObj;
-    try {
-      bookingIdObj = ObjectId.parse(bookingId);
-    } catch (e) {
-      bookingIdObj = bookingId;
-    }
+    final doc = await _collection.doc(bookingId).get();
     
-    final bookingDoc = await _collection.findOne(
-      bookingIdObj is ObjectId ? where.id(bookingIdObj) : where.eq('_id', bookingIdObj)
-    );
-    
-    if (bookingDoc == null) {
+    if (!doc.exists) {
       return null;
     }
     
-    return Booking.fromJson(bookingDoc);
+    return Booking.fromFirestore(doc);
   }
   
   // Cancel a booking
   Future<bool> cancelBooking(String bookingId) async {
-    // Parse bookingId as ObjectId if possible
-    dynamic bookingIdObj;
     try {
-      bookingIdObj = ObjectId.parse(bookingId);
+      await _collection.doc(bookingId).update({
+        'status': 'cancelled',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
     } catch (e) {
-      bookingIdObj = bookingId;
+      return false;
     }
-    
-    final result = await _collection.update(
-      bookingIdObj is ObjectId ? where.id(bookingIdObj) : where.eq('_id', bookingIdObj),
-      {
-        r'$set': {
-          'status': 'cancelled',
-          'updatedAt': DateTime.now().toIso8601String(),
-        }
-      }
-    );
-    
-    return result['nModified'] > 0;
   }
   
   // Mark a booking as completed
   Future<bool> completeBooking(String bookingId) async {
-    // Parse bookingId as ObjectId if possible
-    dynamic bookingIdObj;
     try {
-      bookingIdObj = ObjectId.parse(bookingId);
+      await _collection.doc(bookingId).update({
+        'status': 'completed',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
     } catch (e) {
-      bookingIdObj = bookingId;
+      return false;
     }
-    
-    final result = await _collection.update(
-      bookingIdObj is ObjectId ? where.id(bookingIdObj) : where.eq('_id', bookingIdObj),
-      {
-        r'$set': {
-          'status': 'completed',
-          'updatedAt': DateTime.now().toIso8601String(),
-        }
-      }
-    );
-    
-    return result['nModified'] > 0;
   }
   
   // Get active bookings for a user
   Future<List<Booking>> getActiveBookings(String userId) async {
-    // Parse userId as ObjectId if possible
-    dynamic userIdObj;
-    try {
-      userIdObj = ObjectId.parse(userId);
-    } catch (e) {
-      userIdObj = userId;
-    }
+    final querySnapshot = await _collection
+        .where('userId', isEqualTo: userId)
+        .where('status', isEqualTo: 'active')
+        .orderBy('startTime')
+        .get();
     
-    final bookings = await _collection.find(
-      userIdObj is ObjectId 
-          ? where.eq('userId', userIdObj).eq('status', 'active')
-          : where.eq('userId', userIdObj).eq('status', 'active')
-    ).toList();
-    
-    return bookings.map((doc) => Booking.fromJson(doc)).toList();
+    return querySnapshot.docs
+        .map((doc) => Booking.fromFirestore(doc))
+        .toList();
   }
   
   // Get booking history for a user (completed and cancelled bookings)
   Future<List<Booking>> getBookingHistory(String userId) async {
-    // Parse userId as ObjectId if possible
-    dynamic userIdObj;
-    try {
-      userIdObj = ObjectId.parse(userId);
-    } catch (e) {
-      userIdObj = userId;
-    }
+    final querySnapshot = await _collection
+        .where('userId', isEqualTo: userId)
+        .where('status', whereIn: ['completed', 'cancelled'])
+        .orderBy('updatedAt', descending: true)
+        .get();
     
-    final bookings = await _collection.find(
-      userIdObj is ObjectId
-          ? where.eq('userId', userIdObj).oneFrom('status', ['completed', 'cancelled'])
-          : where.eq('userId', userIdObj).oneFrom('status', ['completed', 'cancelled'])
-    ).toList();
-    
-    return bookings.map((doc) => Booking.fromJson(doc)).toList();
+    return querySnapshot.docs
+        .map((doc) => Booking.fromFirestore(doc))
+        .toList();
   }
 }

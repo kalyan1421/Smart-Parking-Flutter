@@ -364,7 +364,7 @@ class _MapScreenState extends State<MapScreen> {
                 locationProvider.latitude,
                 locationProvider.longitude,
               ),
-              zoom: AppConstants.defaultZoom,
+              zoom: 15.0,
             ),
           ),
         );
@@ -444,7 +444,7 @@ class _MapScreenState extends State<MapScreen> {
                 locationProvider.latitude,
                 locationProvider.longitude,
               ),
-              zoom: AppConstants.defaultZoom,
+              zoom: 15.0,
             ),
             onMapCreated: _onMapCreated,
             myLocationEnabled: true,

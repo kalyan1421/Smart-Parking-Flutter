@@ -293,7 +293,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
           GoogleMap(
             initialCameraPosition: CameraPosition(
               target: widget.origin,
-              zoom: AppConstants.defaultZoom,
+              zoom: 15.0,
             ),
             onMapCreated: _onMapCreated,
             myLocationEnabled: true,

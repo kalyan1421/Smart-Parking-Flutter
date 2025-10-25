@@ -1,174 +1,408 @@
-// lib/providers/booking_provider.dart
+// lib/providers/booking_provider.dart - Firebase-based booking management
 import 'package:flutter/foundation.dart';
-import 'package:smart_parking_app/models/booking.dart';
-import 'package:smart_parking_app/models/parking_spot.dart';
-import 'package:smart_parking_app/repositories/booking_repository.dart';
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:uuid/uuid.dart';
+import '../core/database/database_service.dart';
+import '../models/booking.dart';
+import '../models/parking_spot.dart';
+import '../models/vehicle.dart';
+import '../repositories/booking_repository.dart';
+import '../services/pdf_manager.dart';
 
 class BookingProvider with ChangeNotifier {
   final BookingRepository _bookingRepository;
   
-  List<Booking> _activeBookings = [];
-  List<Booking> _bookingHistory = [];
+  List<Booking> _bookings = [];
   bool _isLoading = false;
   String? _error;
+  Booking? _currentBooking;
+  
+  final Uuid _uuid = const Uuid();
   
   BookingProvider(this._bookingRepository);
   
   // Getters
-  List<Booking> get activeBookings => _activeBookings;
-  List<Booking> get bookingHistory => _bookingHistory;
+  List<Booking> get bookings => _bookings;
+  List<Booking> get activeBookings => _bookings.where((b) => b.isActive).toList();
+  List<Booking> get bookingHistory => _bookings.where((b) => b.isCompleted || b.isCancelled).toList();
+  List<Booking> get upcomingBookings => _bookings.where((b) => b.isUpcoming && (b.isConfirmed || b.isPending)).toList();
+  List<Booking> get completedBookings => _bookings.where((b) => b.isCompleted).toList();
+  List<Booking> get cancelledBookings => _bookings.where((b) => b.isCancelled).toList();
+  List<Booking> get currentActiveBookings => _bookings.where((b) => b.isHappeningNow && b.isActive).toList();
   bool get isLoading => _isLoading;
   String? get error => _error;
+  Booking? get currentBooking => _currentBooking;
   
-  // Create a new booking
+  // Load user bookings
+  Future<void> loadUserBookings(String userId) async {
+    _setLoading(true);
+    try {
+      final querySnapshot = await DatabaseService.collection('bookings')
+          .where('userId', isEqualTo: userId)
+          .orderBy('createdAt', descending: true)
+          .get();
+      
+      _bookings = querySnapshot.docs
+          .map((doc) => Booking.fromFirestore(doc))
+          .toList();
+      
+      _error = null;
+    } catch (e) {
+      _error = 'Failed to load bookings: $e';
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  // Create a new booking with Firestore transaction
   Future<Booking?> createBooking(
     String userId,
     ParkingSpot parkingSpot,
     DateTime startTime,
     DateTime endTime,
-    double totalPrice
-  ) async {
+    double totalPrice, {
+    String? vehicleId,
+    String? notes,
+  }) async {
     _setLoading(true);
-    clearError();
-    
     try {
-      final booking = await _bookingRepository.createBooking(
-        userId,
-        parkingSpot,
-        startTime,
-        endTime,
-        totalPrice,
-      );
+      // Use Firestore transaction to ensure data consistency
+      final bookingId = _uuid.v4();
+      Booking? createdBooking;
       
-      // Add to active bookings
-      _activeBookings = [booking, ..._activeBookings];
-      notifyListeners();
+      await DatabaseService.runTransaction((transaction) async {
+        // Get parking spot details
+        final spotDoc = await transaction.get(
+          DatabaseService.collection('parking_spots').doc(parkingSpot.id)
+        );
+        
+        if (!spotDoc.exists) {
+          throw Exception('Parking spot not found');
+        }
+        
+        final spot = ParkingSpot.fromFirestore(spotDoc);
+        
+        // Check availability
+        if (spot.availableSpots <= 0) {
+          throw Exception('No available spots');
+        }
+        
+        // Check for conflicting bookings
+        final conflictingBookings = await DatabaseService.collection('bookings')
+            .where('parkingSpotId', isEqualTo: parkingSpot.id)
+            .where('status', whereIn: ['confirmed', 'active'])
+            .get();
+        
+        bool hasConflict = false;
+        for (var doc in conflictingBookings.docs) {
+          final booking = Booking.fromFirestore(doc);
+          if (_isTimeConflict(startTime, endTime, booking.startTime, booking.endTime)) {
+            hasConflict = true;
+            break;
+          }
+        }
+        
+        if (hasConflict) {
+          throw Exception('Time slot is already booked');
+        }
+        
+        // Calculate total price
+        final duration = endTime.difference(startTime);
+        final hours = duration.inMinutes / 60.0;
+        final calculatedPrice = hours * spot.pricePerHour;
+        
+        // Create booking
+        final booking = Booking(
+          id: bookingId,
+          userId: userId,
+          parkingSpotId: parkingSpot.id,
+          parkingSpotName: spot.name,
+          vehicleId: vehicleId ?? '',
+          latitude: spot.latitude,
+          longitude: spot.longitude,
+          startTime: startTime,
+          endTime: endTime,
+          pricePerHour: spot.pricePerHour,
+          totalPrice: calculatedPrice,
+          status: BookingStatus.confirmed,
+          createdAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+          notes: notes,
+        );
+        
+        // Save booking
+        transaction.set(
+          DatabaseService.collection('bookings').doc(bookingId),
+          booking.toMap()
+        );
+        
+        // Update parking spot availability
+        transaction.update(
+          DatabaseService.collection('parking_spots').doc(parkingSpot.id),
+          {
+            'availableSpots': spot.availableSpots - 1,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }
+        );
+        
+        createdBooking = booking;
+      });
       
-      return booking;
+      if (createdBooking != null) {
+        // Add booking to local list
+        _bookings.insert(0, createdBooking!);
+        _currentBooking = createdBooking;
+        _error = null;
+        notifyListeners();
+        
+        // Note: PDF generation will be handled by the UI layer
+        // after successful booking creation to access BuildContext
+        
+        return createdBooking;
+      }
+      return null;
     } catch (e) {
-      _setError('Failed to create booking: ${e.toString()}');
+      _error = 'Failed to create booking: $e';
+      notifyListeners();
       return null;
     } finally {
       _setLoading(false);
     }
   }
   
-  // Load user's active bookings
-  Future<void> loadActiveBookings(String userId) async {
-    _setLoading(true);
-    clearError();
-    
-    try {
-      final bookings = await _bookingRepository.getActiveBookings(userId);
-      _activeBookings = bookings;
-      notifyListeners();
-    } catch (e) {
-      _setError('Failed to load active bookings: ${e.toString()}');
-    } finally {
-      _setLoading(false);
-    }
+  // Stream user bookings in real-time
+  Stream<List<Booking>> streamUserBookings(String userId) {
+    return DatabaseService.collection('bookings')
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) => snapshot.docs
+            .map((doc) => Booking.fromFirestore(doc))
+            .toList());
+  }
+
+  // Check for time conflicts
+  bool _isTimeConflict(DateTime start1, DateTime end1, DateTime start2, DateTime end2) {
+    return start1.isBefore(end2) && end1.isAfter(start2);
   }
   
-  // Load user's booking history
-  Future<void> loadBookingHistory(String userId) async {
-    _setLoading(true);
-    clearError();
-    
-    try {
-      final bookings = await _bookingRepository.getBookingHistory(userId);
-      _bookingHistory = bookings;
-      notifyListeners();
-    } catch (e) {
-      _setError('Failed to load booking history: ${e.toString()}');
-    } finally {
-      _setLoading(false);
-    }
-  }
-  
-  // Cancel a booking
+  // Cancel a booking with refund calculation
   Future<bool> cancelBooking(String bookingId) async {
     _setLoading(true);
-    clearError();
-    
     try {
-      final success = await _bookingRepository.cancelBooking(bookingId);
+      bool success = false;
       
-      if (success) {
-        // Update booking status in local lists
-        final activeIndex = _activeBookings.indexWhere((b) => b.id.toHexString() == bookingId);
-        if (activeIndex >= 0) {
-          final updatedBooking = _activeBookings[activeIndex].copyWith(
-            status: 'cancelled',
+      await DatabaseService.runTransaction((transaction) async {
+        // Get booking details
+        final bookingDoc = await transaction.get(
+          DatabaseService.collection('bookings').doc(bookingId)
+        );
+        
+        if (!bookingDoc.exists) {
+          throw Exception('Booking not found');
+        }
+        
+        final booking = Booking.fromFirestore(bookingDoc);
+        
+        // Check if booking can be cancelled
+        if (!booking.canBeCancelled()) {
+          throw Exception('Booking cannot be cancelled');
+        }
+        
+        // Calculate refund
+        final refundAmount = booking.getRefundAmount();
+        final cancellationFee = booking.totalPrice - refundAmount;
+        
+        // Update booking status
+        transaction.update(
+          DatabaseService.collection('bookings').doc(bookingId),
+          {
+            'status': BookingStatus.cancelled.name,
+            'cancellationFee': cancellationFee,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }
+        );
+        
+        // Update parking spot availability
+        final spotDoc = await transaction.get(
+          DatabaseService.collection('parking_spots').doc(booking.parkingSpotId)
+        );
+        
+        if (spotDoc.exists) {
+          final spot = ParkingSpot.fromFirestore(spotDoc);
+          transaction.update(
+            DatabaseService.collection('parking_spots').doc(booking.parkingSpotId),
+            {
+              'availableSpots': spot.availableSpots + 1,
+              'updatedAt': FieldValue.serverTimestamp(),
+            }
+          );
+        }
+        
+        // Update local booking
+        final index = _bookings.indexWhere((b) => b.id == bookingId);
+        if (index != -1) {
+          _bookings[index] = booking.copyWith(
+            status: BookingStatus.cancelled,
+            cancellationFee: cancellationFee,
             updatedAt: DateTime.now(),
           );
-          
-          // Remove from active bookings
-          _activeBookings.removeAt(activeIndex);
-          
-          // Add to booking history
-          _bookingHistory = [updatedBooking, ..._bookingHistory];
-          
-          notifyListeners();
         }
-      }
+        
+        success = true;
+      });
       
-      return success;
+      if (success) {
+        _error = null;
+        notifyListeners();
+        return true;
+      }
+      return false;
     } catch (e) {
-      _setError('Failed to cancel booking: ${e.toString()}');
+      _error = 'Failed to cancel booking: $e';
+      notifyListeners();
       return false;
     } finally {
       _setLoading(false);
     }
   }
   
-  // Complete a booking
-  Future<bool> completeBooking(String bookingId) async {
-    _setLoading(true);
-    clearError();
-    
+  // Check in to parking spot
+  Future<bool> checkIn(String bookingId) async {
     try {
-      final success = await _bookingRepository.completeBooking(bookingId);
+      await DatabaseService.collection('bookings').doc(bookingId).update({
+        'status': BookingStatus.active.name,
+        'checkedInAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
       
-      if (success) {
-        // Update booking status in local lists
-        final activeIndex = _activeBookings.indexWhere((b) => b.id.toHexString() == bookingId);
-        if (activeIndex >= 0) {
-          final updatedBooking = _activeBookings[activeIndex].copyWith(
-            status: 'completed',
-            updatedAt: DateTime.now(),
-          );
-          
-          // Remove from active bookings
-          _activeBookings.removeAt(activeIndex);
-          
-          // Add to booking history
-          _bookingHistory = [updatedBooking, ..._bookingHistory];
-          
-          notifyListeners();
-        }
+      // Update local booking
+      final index = _bookings.indexWhere((b) => b.id == bookingId);
+      if (index != -1) {
+        _bookings[index] = _bookings[index].copyWith(
+          status: BookingStatus.active,
+          checkedInAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        );
       }
       
-      return success;
+      notifyListeners();
+      return true;
     } catch (e) {
-      _setError('Failed to complete booking: ${e.toString()}');
+      _error = 'Failed to check in: $e';
+      notifyListeners();
       return false;
-    } finally {
-      _setLoading(false);
     }
+  }
+  
+  // Check out from parking spot
+  Future<bool> checkOut(String bookingId) async {
+    try {
+      await DatabaseService.collection('bookings').doc(bookingId).update({
+        'status': BookingStatus.completed.name,
+        'checkedOutAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      // Update local booking
+      final index = _bookings.indexWhere((b) => b.id == bookingId);
+      if (index != -1) {
+        _bookings[index] = _bookings[index].copyWith(
+          status: BookingStatus.completed,
+          checkedOutAt: DateTime.now(),
+          updatedAt: DateTime.now(),
+        );
+      }
+      
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = 'Failed to check out: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Complete a booking (backward compatibility)
+  Future<bool> completeBooking(String bookingId) async {
+    return await checkOut(bookingId);
   }
   
   // Get a booking by ID
   Future<Booking?> getBookingById(String bookingId) async {
-    _setLoading(true);
-    clearError();
-    
     try {
-      return await _bookingRepository.getBookingById(bookingId);
-    } catch (e) {
-      _setError('Failed to get booking: ${e.toString()}');
+      // First check if it's in our loaded bookings
+      final localBooking = _bookings.where((b) => b.id == bookingId).firstOrNull;
+      if (localBooking != null) return localBooking;
+      
+      // If not found locally, fetch from Firestore
+      final doc = await DatabaseService.collection('bookings').doc(bookingId).get();
+      if (doc.exists) {
+        return Booking.fromFirestore(doc);
+      }
       return null;
-    } finally {
-      _setLoading(false);
+    } catch (e) {
+      _error = 'Failed to get booking: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  // Add feedback to completed booking
+  Future<bool> addFeedback(String bookingId, double rating, String? review) async {
+    try {
+      final feedback = {
+        'rating': rating,
+        'review': review,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+      
+      await DatabaseService.collection('bookings').doc(bookingId).update({
+        'feedback': feedback,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      // Update local booking
+      final index = _bookings.indexWhere((b) => b.id == bookingId);
+      if (index != -1) {
+        _bookings[index] = _bookings[index].copyWith(
+          feedback: {
+            'rating': rating,
+            'review': review,
+            'createdAt': DateTime.now().toIso8601String(),
+          },
+          updatedAt: DateTime.now(),
+        );
+      }
+      
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _error = 'Failed to add feedback: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Check availability for a time slot
+  Future<bool> isTimeSlotAvailable(String spotId, DateTime startTime, DateTime endTime) async {
+    try {
+      final querySnapshot = await DatabaseService.collection('bookings')
+          .where('parkingSpotId', isEqualTo: spotId)
+          .where('status', whereIn: ['confirmed', 'active'])
+          .get();
+      
+      for (var doc in querySnapshot.docs) {
+        final booking = Booking.fromFirestore(doc);
+        if (_isTimeConflict(startTime, endTime, booking.startTime, booking.endTime)) {
+          return false;
+        }
+      }
+      
+      return true;
+    } catch (e) {
+      return false;
     }
   }
   
@@ -187,4 +421,121 @@ class BookingProvider with ChangeNotifier {
     _error = null;
     notifyListeners();
   }
+
+  void setCurrentBooking(Booking? booking) {
+    _currentBooking = booking;
+    notifyListeners();
+  }
+
+  // PDF Receipt Generation Methods
+  
+  // Generate PDF receipt for booking
+  Future<void> generateBookingReceipt(
+    BuildContext context, 
+    Booking booking, {
+    String? transactionId,
+    String? paymentMethod,
+  }) async {
+    try {
+      await PdfManager.generateBookingReceipt(
+        context: context,
+        booking: booking,
+        transactionId: transactionId,
+        paymentMethod: paymentMethod,
+      );
+    } catch (e) {
+      _error = 'Failed to generate receipt: $e';
+      notifyListeners();
+    }
+  }
+
+  // Handle booking completion with PDF generation
+  Future<void> completeBookingWithReceipt(
+    BuildContext context, 
+    Booking booking, {
+    String? transactionId,
+    String? paymentMethod,
+  }) async {
+    try {
+      await PdfManager.handleBookingCompletion(
+        context: context,
+        booking: booking,
+        transactionId: transactionId,
+        paymentMethod: paymentMethod,
+      );
+    } catch (e) {
+      _error = 'Failed to complete booking with receipt: $e';
+      notifyListeners();
+    }
+  }
+
+  // Handle booking cancellation with refund receipt
+  Future<void> cancelBookingWithReceipt(
+    BuildContext context, 
+    String bookingId, {
+    String refundReason = 'Booking cancelled by user',
+  }) async {
+    try {
+      final booking = _bookings.firstWhere((b) => b.id == bookingId);
+      final refundAmount = _calculateRefundAmount(booking);
+      
+      await cancelBooking(bookingId);
+      // Assume cancellation was successful if no exception was thrown
+      
+      await PdfManager.handleBookingCancellation(
+          context: context,
+          booking: booking,
+          refundAmount: refundAmount,
+          refundReason: refundReason,
+        );
+    } catch (e) {
+      _error = 'Failed to cancel booking with receipt: $e';
+      notifyListeners();
+    }
+  }
+
+  // Generate batch receipts for multiple bookings
+  Future<void> generateBatchReceipts(
+    BuildContext context, 
+    List<Booking> bookings,
+  ) async {
+    try {
+      await PdfManager.generateBatchReceipts(
+        context: context,
+        bookings: bookings,
+      );
+    } catch (e) {
+      _error = 'Failed to generate batch receipts: $e';
+      notifyListeners();
+    }
+  }
+
+  // Calculate refund amount based on cancellation policy
+  double _calculateRefundAmount(Booking booking) {
+    final now = DateTime.now();
+    final hoursUntilStart = booking.startTime.difference(now).inHours;
+    
+    // Refund policy:
+    // - More than 24 hours: 90% refund
+    // - 2-24 hours: 50% refund
+    // - Less than 2 hours: No refund
+    if (hoursUntilStart > 24) {
+      return booking.totalPrice * 0.9; // 90% refund
+    } else if (hoursUntilStart > 2) {
+      return booking.totalPrice * 0.5; // 50% refund
+    } else {
+      return 0.0; // No refund
+    }
+  }
+
+  // Backward compatibility methods
+  Future<void> loadActiveBookings(String userId) async {
+    await loadUserBookings(userId);
+  }
+
+  Future<void> loadBookingHistory(String userId) async {
+    await loadUserBookings(userId);
+  }
+  
+  // Additional methods for booking history are already defined above
 }

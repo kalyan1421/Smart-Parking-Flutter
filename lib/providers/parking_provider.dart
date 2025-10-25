@@ -1,52 +1,116 @@
-// lib/providers/parking_provider.dart
+// lib/providers/parking_provider.dart - Firebase-based parking management
 import 'package:flutter/foundation.dart';
-import 'package:smart_parking_app/models/parking_spot.dart';
-import 'package:smart_parking_app/providers/parking_service.dart';
-import 'package:smart_parking_app/screens/parking/id_generator.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geoflutterfire_plus/geoflutterfire_plus.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:uuid/uuid.dart';
+import '../core/database/database_service.dart';
+import '../models/parking_spot.dart';
 
 class ParkingProvider extends ChangeNotifier {
-  final ParkingService _parkingService;
-  
-  List<ParkingSpot> _nearbyParkingSpots = [];
+  List<ParkingSpot> _parkingSpots = [];
+  List<ParkingSpot> _filteredSpots = [];
   ParkingSpot? _selectedParkingSpot;
   bool _isLoading = false;
   String? _error;
+  Position? _currentLocation;
   
-  // User created parking spots (local storage)
-  List<ParkingSpot> _userCreatedSpots = [];
+  // Filter properties
+  double _maxPrice = 100.0;
+  double _minPrice = 0.0;
+  List<String> _selectedAmenities = [];
+  List<String> _selectedVehicleTypes = [];
+  double _searchRadius = 2000; // in meters
+  String _sortBy = 'distance'; // distance, price, rating
+  bool _showAvailableOnly = true;
   
-  ParkingProvider(this._parkingService);
   
   // Getters
-  List<ParkingSpot> get nearbyParkingSpots => _nearbyParkingSpots;
+  List<ParkingSpot> get parkingSpots => _filteredSpots;
+  List<ParkingSpot> get nearbyParkingSpots => _filteredSpots; // For backward compatibility
+  List<ParkingSpot> get allParkingSpots => _parkingSpots;
   ParkingSpot? get selectedParkingSpot => _selectedParkingSpot;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  Position? get currentLocation => _currentLocation;
+  double get maxPrice => _maxPrice;
+  double get minPrice => _minPrice;
+  List<String> get selectedAmenities => _selectedAmenities;
+  List<String> get selectedVehicleTypes => _selectedVehicleTypes;
+  double get searchRadius => _searchRadius;
+  String get sortBy => _sortBy;
+  bool get showAvailableOnly => _showAvailableOnly;
   
-  // Find nearby parking spots
+  // Initialize current location
+  Future<void> initializeLocation() async {
+    try {
+      final permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        final requestPermission = await Geolocator.requestPermission();
+        if (requestPermission == LocationPermission.denied) {
+          throw Exception('Location permission denied');
+        }
+      }
+      
+      _currentLocation = await Geolocator.getCurrentPosition();
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to get location: $e';
+      notifyListeners();
+    }
+  }
+
+  // Find nearby parking spots - Updated for Firebase
   Future<void> findNearbyParkingSpots(
     double latitude, 
     double longitude, 
     {double radius = 1.0}
   ) async {
+    await loadParkingSpotsNear(latitude, longitude, radius: radius * 1000); // Convert to meters
+  }
+  
+  // Load parking spots near location
+  Future<void> loadParkingSpotsNear(double latitude, double longitude, {double? radius}) async {
     _setLoading(true);
-    clearError(); // Changed from _clearError to clearError
-    
     try {
-      // Get spots from API
-      final spots = await _parkingService.findNearbyParkingSpots(
-        latitude, 
-        longitude, 
-        radius: radius
-      );
+      final searchRadius = radius ?? _searchRadius;
+      final center = GeoFirePoint(GeoPoint(latitude, longitude));
       
-      // Merge with user created spots
-      final allSpots = [...spots, ..._getUserCreatedSpotsNearby(latitude, longitude, radius)];
+      // Query Firestore using GeoFlutterFirePlus
+      final collectionRef = DatabaseService.collection('parkingSpots');
+      final geoCollectionReference = GeoCollectionReference(collectionRef);
       
-      _nearbyParkingSpots = allSpots;
-      notifyListeners();
+      try {
+        // Try geoflutterfire_plus geospatial query
+        final querySnapshot = await geoCollectionReference.fetchWithin(
+          center: center,
+          radiusInKm: searchRadius / 1000,
+          field: 'position',
+          geopointFrom: (data) {
+            final dataMap = data as Map<String, dynamic>?;
+            final position = dataMap?['position'] as Map<String, dynamic>?;
+            return position?['geopoint'] as GeoPoint? ?? const GeoPoint(0, 0);
+          },
+        );
+        
+        _parkingSpots = querySnapshot
+            .map((doc) => ParkingSpot.fromFirestore(doc))
+            .toList();
+      } catch (geoError) {
+        // Fallback to simple query without geo filtering
+        final querySnapshot = await collectionRef.limit(20).get();
+        
+        _parkingSpots = querySnapshot.docs
+            .map((doc) => ParkingSpot.fromFirestore(doc))
+            .toList();
+      }
+      
+      _applyFilters();
+      _error = null;
     } catch (e) {
-      _setError('Failed to load parking spots: ${e.toString()}');
+      _error = 'Failed to load parking spots: $e';
+      _parkingSpots = [];
+      _filteredSpots = [];
     } finally {
       _setLoading(false);
     }
@@ -58,170 +122,286 @@ class ParkingProvider extends ChangeNotifier {
     notifyListeners();
   }
   
-  // Add a new parking spot (user created)
-  Future<void> addParkingSpot(ParkingSpot spot) async {
-    _setLoading(true);
-    clearError(); // Changed from _clearError to clearError
-    
-    try {
-      // Set an ID if not provided
-      if (spot.id == null) {
-        final updatedSpot = spot.copyWith(
-          id: IdGenerator.generateObjectId(),
+  // Apply filters to parking spots
+  void _applyFilters() {
+    _filteredSpots = _parkingSpots.where((spot) {
+      // Availability filter
+      if (_showAvailableOnly && !spot.isAvailableForBooking()) return false;
+      
+      // Price filter
+      if (spot.pricePerHour < _minPrice || spot.pricePerHour > _maxPrice) return false;
+      
+      // Amenities filter
+      if (_selectedAmenities.isNotEmpty) {
+        bool hasSelectedAmenities = _selectedAmenities.every(
+          (amenity) => spot.amenities.contains(amenity)
         );
-        spot = updatedSpot;
+        if (!hasSelectedAmenities) return false;
       }
       
-      // Store locally for now (in production, this would be sent to the server)
-      _userCreatedSpots.add(spot);
-      
-      // Add to nearby spots if not already there
-      if (!_nearbyParkingSpots.any((s) => s.id.toHexString() == spot.id.toHexString())) {
-        _nearbyParkingSpots.add(spot);
+      // Vehicle type filter
+      if (_selectedVehicleTypes.isNotEmpty) {
+        bool supportsVehicleType = _selectedVehicleTypes.any(
+          (vehicleType) => spot.vehicleTypes.contains(vehicleType)
+        );
+        if (!supportsVehicleType) return false;
       }
       
-      notifyListeners();
+      return true;
+    }).toList();
+    
+    // Apply sorting
+    _sortSpots();
+    
+    notifyListeners();
+  }
+  
+  // Sort spots based on selected criteria
+  void _sortSpots() {
+    switch (_sortBy) {
+      case 'price':
+        _filteredSpots.sort((a, b) => a.pricePerHour.compareTo(b.pricePerHour));
+        break;
+      case 'rating':
+        _filteredSpots.sort((a, b) => b.rating.compareTo(a.rating));
+        break;
+      case 'distance':
+        if (_currentLocation != null) {
+          _filteredSpots.sort((a, b) {
+            final distanceA = Geolocator.distanceBetween(
+              _currentLocation!.latitude, _currentLocation!.longitude,
+              a.latitude, a.longitude
+            );
+            final distanceB = Geolocator.distanceBetween(
+              _currentLocation!.latitude, _currentLocation!.longitude,
+              b.latitude, b.longitude
+            );
+            return distanceA.compareTo(distanceB);
+          });
+        }
+        break;
+    }
+  }
+  
+  // NOTE: Parking spot creation is now handled by admin app only
+  // Users can only view and book existing parking spots
+  
+  // Update spot availability
+  Future<bool> updateSpotAvailability(String spotId, int availableSpots) async {
+    try {
+      await DatabaseService.collection('parkingSpots').doc(spotId).update({
+        'availableSpots': availableSpots,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      // Update local list
+      final index = _parkingSpots.indexWhere((s) => s.id == spotId);
+      if (index != -1) {
+        _parkingSpots[index] = _parkingSpots[index].copyWith(
+          availableSpots: availableSpots,
+          updatedAt: DateTime.now(),
+        );
+        _applyFilters();
+      }
+      
+      return true;
     } catch (e) {
-      _setError('Failed to add parking spot: ${e.toString()}');
+      _error = 'Failed to update availability: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // Book a parking spot (simplified - actual booking logic in BookingProvider)
+  Future<bool> bookParkingSpot(ParkingSpot spot, DateTime startTime, DateTime endTime) async {
+    // This method now just updates availability
+    // The actual booking creation is handled by BookingProvider
+    return await updateSpotAvailability(spot.id, spot.availableSpots - 1);
+  }
+  
+  // Filter and search methods
+  void updatePriceRange(double minPrice, double maxPrice) {
+    _minPrice = minPrice;
+    _maxPrice = maxPrice;
+    _applyFilters();
+  }
+  
+  void updateSelectedAmenities(List<String> amenities) {
+    _selectedAmenities = amenities;
+    _applyFilters();
+  }
+  
+  void updateSelectedVehicleTypes(List<String> vehicleTypes) {
+    _selectedVehicleTypes = vehicleTypes;
+    _applyFilters();
+  }
+  
+  void updateSearchRadius(double radius) {
+    _searchRadius = radius;
+    notifyListeners();
+  }
+  
+  void updateSortBy(String sortBy) {
+    _sortBy = sortBy;
+    _applyFilters();
+  }
+  
+  void toggleAvailabilityFilter() {
+    _showAvailableOnly = !_showAvailableOnly;
+    _applyFilters();
+  }
+  
+  void clearFilters() {
+    _maxPrice = 100.0;
+    _minPrice = 0.0;
+    _selectedAmenities = [];
+    _selectedVehicleTypes = [];
+    _showAvailableOnly = true;
+    _sortBy = 'distance';
+    _applyFilters();
+  }
+  
+
+  // Get parking spot by ID
+  Future<ParkingSpot?> getParkingSpotById(String id) async {
+    try {
+      // First check if it's in our loaded spots
+      final localSpot = _parkingSpots.where((spot) => spot.id == id).firstOrNull;
+      if (localSpot != null) return localSpot;
+      
+      // If not found locally, fetch from Firestore
+      final doc = await DatabaseService.collection('parkingSpots').doc(id).get();
+      if (doc.exists) {
+        return ParkingSpot.fromFirestore(doc);
+      }
+      return null;
+    } catch (e) {
+      _error = 'Failed to get parking spot: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+  
+  // Load all parking spots from Firebase
+  Future<void> loadAllParkingSpots() async {
+    _setLoading(true);
+    try {
+      final querySnapshot = await DatabaseService.collection('parkingSpots')
+          .orderBy('createdAt', descending: true)
+          .get();
+      
+      _parkingSpots = querySnapshot.docs
+          .map((doc) => ParkingSpot.fromFirestore(doc))
+          .toList();
+      
+      _applyFilters();
+      _error = null;
+    } catch (e) {
+      _error = 'Failed to load parking spots: $e';
+      _parkingSpots = [];
+      _filteredSpots = [];
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  // Search parking spots by query
+  Future<void> searchParkingSpots(String query) async {
+    _setLoading(true);
+    try {
+      final querySnapshot = await DatabaseService.collection('parkingSpots')
+          .where('name', isGreaterThanOrEqualTo: query)
+          .where('name', isLessThanOrEqualTo: query + '\uf8ff')
+          .limit(20)
+          .get();
+      
+      _parkingSpots = querySnapshot.docs
+          .map((doc) => ParkingSpot.fromFirestore(doc))
+          .toList();
+      
+      _applyFilters();
+      _error = null;
+    } catch (e) {
+      _error = 'Failed to search parking spots: $e';
+      _parkingSpots = [];
+      _filteredSpots = [];
     } finally {
       _setLoading(false);
     }
   }
   
-  // Book a parking spot
-  Future<bool> bookParkingSpot(ParkingSpot spot, DateTime startTime, DateTime endTime) async {
+  // NOTE: Parking spot updates and deletions are handled by admin app only
+  // Users can only view parking spots and update availability through bookings
+  
+  // Get spots owned by user
+  Future<void> loadUserOwnedSpots(String userId) async {
     _setLoading(true);
-    clearError(); // Changed from _clearError to clearError
-    
     try {
-      // If it's a user-created spot, handle it locally
-      if (spot.isUserCreated == true) {
-        // Update available spots locally
-        _updateAvailableSpots(spot, -1); // decrease by 1
-        
-        // In a real app, this would also create a booking record
-        _setLoading(false);
-        return true;
-      }
+      final querySnapshot = await DatabaseService.collection('parkingSpots')
+          .where('ownerId', isEqualTo: userId)
+          .get();
       
-      // Otherwise, use the service
-      final success = await _parkingService.bookParkingSpot(
-        spot.id.toHexString(), 
-        startTime, 
-        endTime
-      );
+      _parkingSpots = querySnapshot.docs
+          .map((doc) => ParkingSpot.fromFirestore(doc))
+          .toList();
       
-      if (success) {
-        // Update available spots in our local list
-        _updateAvailableSpots(spot, -1); // decrease by 1
-      }
-      
-      _setLoading(false);
-      return success;
+      _applyFilters();
+      _error = null;
     } catch (e) {
-      _setError('Failed to book parking spot: ${e.toString()}');
+      _error = 'Failed to load owned spots: $e';
+      _parkingSpots = [];
+      _filteredSpots = [];
+    } finally {
       _setLoading(false);
-      return false;
     }
   }
   
-  // Cancel a parking spot booking
-  Future<bool> cancelBooking(String bookingId) async {
-    _setLoading(true);
-    clearError(); // Changed from _clearError to clearError
+  // Get distance to parking spot
+  double? getDistanceToSpot(ParkingSpot spot) {
+    if (_currentLocation == null) return null;
     
-    try {
-      // In a real app, you would get the spot ID from the booking
-      // For now, we'll just assume it's for the selected spot
-      
-      if (_selectedParkingSpot != null) {
-        // If it's a user-created spot, handle it locally
-        if (_selectedParkingSpot!.isUserCreated == true) {
-          // Update available spots locally
-          _updateAvailableSpots(_selectedParkingSpot!, 1); // increase by 1
-          
-          _setLoading(false);
-          return true;
-        }
-        
-        // Otherwise, use the service
-        final success = await _parkingService.cancelBooking(bookingId);
-        
-        if (success) {
-          // Update available spots in our local list
-          _updateAvailableSpots(_selectedParkingSpot!, 1); // increase by 1
-        }
-        
-        _setLoading(false);
-        return success;
-      }
-      
-      _setLoading(false);
-      return false;
-    } catch (e) {
-      _setError('Failed to cancel booking: ${e.toString()}');
-      _setLoading(false);
-      return false;
-    }
-  }
-  
-  // Helper to update available spots
-  void _updateAvailableSpots(ParkingSpot spot, int change) {
-    // Update in the nearby spots list
-    final index = _nearbyParkingSpots.indexWhere(
-      (s) => s.id.toHexString() == spot.id.toHexString()
+    return Geolocator.distanceBetween(
+      _currentLocation!.latitude,
+      _currentLocation!.longitude,
+      spot.latitude,
+      spot.longitude,
     );
+  }
+  
+  // Stream parking spots in real-time
+  Stream<List<ParkingSpot>> streamParkingSpotsNear(double latitude, double longitude) {
+    final center = GeoFirePoint(GeoPoint(latitude, longitude));
+    final collectionRef = DatabaseService.collection('parkingSpots');
+    final geoCollectionReference = GeoCollectionReference(collectionRef);
     
-    if (index >= 0) {
-      final updatedSpot = _nearbyParkingSpots[index].copyWith(
-        availableSpots: _nearbyParkingSpots[index].availableSpots + change
-      );
-      
-      _nearbyParkingSpots[index] = updatedSpot;
-      
-      // If this is the selected spot, update that too
-      if (_selectedParkingSpot?.id.toHexString() == spot.id.toHexString()) {
-        _selectedParkingSpot = updatedSpot;
-      }
-      
-      // If it's a user-created spot, update in that list too
-      if (spot.isUserCreated == true) {
-        final userSpotIndex = _userCreatedSpots.indexWhere(
-          (s) => s.id.toHexString() == spot.id.toHexString()
-        );
-        
-        if (userSpotIndex >= 0) {
-          _userCreatedSpots[userSpotIndex] = updatedSpot;
-        }
-      }
-      
-      notifyListeners();
-    }
+    return geoCollectionReference.subscribeWithin(
+      center: center,
+      radiusInKm: _searchRadius / 1000,
+      field: 'position',
+      geopointFrom: (data) {
+        final dataMap = data as Map<String, dynamic>?;
+        final position = dataMap?['position'] as Map<String, dynamic>?;
+        return position?['geopoint'] as GeoPoint? ?? const GeoPoint(0, 0);
+      },
+    ).map((querySnapshot) => querySnapshot
+        .map((doc) => ParkingSpot.fromFirestore(doc))
+        .toList());
   }
   
-  // Filter user created spots by distance
-  List<ParkingSpot> _getUserCreatedSpotsNearby(
-    double latitude, 
-    double longitude, 
-    double radiusKm
-  ) {
-    // In a real app, you would calculate actual distance
-    // For now, we'll just return all user-created spots
-    return _userCreatedSpots;
+  // Cancel booking (simplified - actual logic in BookingProvider)
+  Future<bool> cancelBooking(String bookingId) async {
+    // This is now handled by BookingProvider
+    // Just return true for backward compatibility
+    return true;
   }
   
-  // Loading and error handling
+  // Helper methods
   void _setLoading(bool loading) {
     _isLoading = loading;
     notifyListeners();
   }
   
-  void _setError(String errorMessage) {
-    _error = errorMessage;
-    notifyListeners();
-  }
   
-  // This method was missing
   void clearError() {
     _error = null;
     notifyListeners();
